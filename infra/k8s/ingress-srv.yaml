@@ -1,0 +1,48 @@
+# apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: 
+  name: ingress-service
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+spec:    
+  rules:
+    - host: ticketing.dev
+      http:
+        paths:
+          - path: /api/users/?(.*) #nginx se pondrá delante y le hará proxy a la aplicacion web server express
+            pathType: "Prefix" # investigar los tipos
+            backend:
+              # serviceName: auth-srv # OJO CON LAS VERSIONES!!
+              # servicePort: 3000
+              service:
+                name: auth-srv
+                port: 
+                  number: 3000
+          - path: /api/tickets/?(.*) # nginx se pondrá delante y le hará proxy a la aplicacion web server express
+            pathType: "Prefix" # investigar los tipos
+            backend:
+              # serviceName: auth-srv # OJO CON LAS VERSIONES!!
+              # servicePort: 3000
+              service:
+                name: tickets-srv
+                port: 
+                  number: 3000
+          - path: /api/orders/?(.*)
+            pathType: "Prefix" # investigar los tipos
+            backend:
+              # serviceName: auth-srv # OJO CON LAS VERSIONES!!
+              # servicePort: 3000
+              service:
+                name: orders-srv
+                port: 
+                  number: 3000
+          - path: /?(.*) # cogerá el resto de rutas,tiene que ir debajo de todas por menor especificidad
+            pathType: "Prefix"
+            backend:
+              service:
+                name: client-srv
+                port:
+                  number: 3000
+ 

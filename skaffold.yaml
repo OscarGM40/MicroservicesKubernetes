@@ -1,0 +1,48 @@
+apiVersion: skaffold/v2alpha3
+kind: Config
+deploy:
+  kubectl:
+    manifests: 
+      - ./infra/k8s/*
+build:      
+  local:
+    push: true # cambiar cuando deje de usar GC
+ # googleCloudBuild:
+  #  projectId: ticketing-dev-313817
+  artifacts:
+    # el contexto es la carpeta donde está el Dockerfile 
+    #- image: us.gcr.io/ticketing-dev-313817/auth 
+    - image: oscargm40/auth-ticketing-k8s 
+      context: auth # nombre del folder,debe coincidir 
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual:
+          - src: 'src/**/*.ts'
+            dest: .
+    #- image: us.gcr.io/ticketing-dev-313817/client #
+    - image: oscargm40/client-ticketing-k8s # falta hacer el build & push al register
+      context: client 
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual: 
+          - src: '**/*.js'
+            dest: .
+    #- image: us.gcr.io/ticketing-dev-313817/tickets #
+    - image: oscargm40/tickets-ticketing-k8s
+      context: tickets
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual: 
+          - src: 'src/**/*.js'
+            dest: .
+    - image: oscargm40/orders-ticketing-k8s
+      context: orders
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual: 
+          - src: 'src/**/*.js'
+            dest: .
