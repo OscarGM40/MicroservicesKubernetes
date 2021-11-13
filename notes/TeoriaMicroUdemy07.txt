@@ -1,0 +1,134 @@
+								VIDEO 383 REMINDER ON VERSIONING RECORDS
+
+Desde ahora el Tickets Srv va a usar otro field llamado 'version'.Lo emitirá también al publicar,informando así del orden cardinal de ese ticket.
+Cada vez que se haga una operació adicional en un mismo ticket se aumentará el número de versió.
+El Orders Srv va a mirar atentamente por este campo,de modo que si le viniera un ticket:updated con 15$ y version 3 pero en la DB la última grabación es la 1 no lo va a procesar.
+Esto lo hacemos no llamado al metodo message.ack()(en realidad lo llamaremos condicionalmente desde ahora).
+El evento volverá al NATS y será emitido al de 5seg de nuevo(lo bajamos de 30).
+NOTA:para evitar eventos que rebotan indefinidamente en un servidor se puede implementar lógica,por ejemplo,con el numero de veces que ha rebotado,si es + de una cantidad x que se borre el evento.
+
+Tanto mongoose como MongoDb pueden manejar este incremento de versión automáticamente,asi que no es algo difícil(un campo autoincremental)
+
+				VIDEO 384 OPTIMISTIC CONCURRENCY CONTROL
+
+Esta estrategia es agnóstica al gestor de DB,puedo usar SQL perfectamente con un versioning system.
+Lo que se hará es buscar tanto por Id como por versión con el ORM,así no hay posibilidad de fallo.Una vez encontrado se procesa la operación y el gestor DB autoincrementa el campo.
+Esto es el camino feliz,pero imaginemos que perdemos el updated a 10$(el dos) y nos llega el tres.Querremos buscar por un ticket con id 'xxx' y version de 2,pero cmo se perdió solo encontraremos la versión 1.
+
+					VIDEO 385 MONGOOSE UPDATE-IF-CURRENT
+
+Vamos a seguir el flujo de la app.Primero cambiaremos la DB del Tickets Srv,despues el modo de publicar que tiene y por último la recepción del evento y posterior guardado en el Orders Srv.
+
+Vamos a usar un módulo que ayude a mongoose en esto(fijate que es para mongoose 5+).
+El módulo está aqui:
+https://www.npmjs.com/package/mongoose-update-if-current
+
+Es un Optimistic concurrency control plugin for Mongoose v5.0 and higher,se importa el plugin desde el módulo y se añade o bien en global o a un determinado schema(a la instancia de mongoose o a la instancia del schema):
+
+import { updateIfCurrentPlugin } from 'mongoose-update-if-current';
+mongoose.plugin(updateIfCurrentPlugin) <- en global para todos los schemas
+mySchema.plugin(updateIfCurrentPlugin) <- sólo ese schema
+
+* Puede usar o el versionKey o el timestamp para incrementar la versión,el comportamiento por defecto será el __v,si quiero usar los timestamps tengo que habilitarlos y especificarlo en un segundo argumento que es un objeto:
+
+mongoose.plugin(updateIfCurrentPlugin,{strategy:'timestamp'})
+
+const mySchema = new mongoose.Schema({ ... }, { timestamps: true });
+mySchema.plugin(updateIfCurrentPlugin, { strategy: 'timestamp' });
+
+NOTA:fijate que el campo __v realmente nació para control de versiones,pues empieza en __v:0,pero lo vamos a renombrar a 'version' por legibilidad.
+
+					VIDEO 386 IMPLEMENTING OOC
+
+Con lo anterior en mente procedemos a instalar el módulo en el srv Tickets.Dado que vamos a renombrar el campo __v a version hay que especificarlo en la interfaz TicketDoc(que hereda de Document y dictamina que propiedades tiene una instancia de la DB,no la confundas con TicketAttrs que es una interfaz normal para el tipado):
+
+// Interfaz que designa las propiedade requeridas para crear un nuevo Ticket.Es una simple interfaz para el tipado
+interface TicketAttrs {
+   title: string;
+   price: number;
+   userId: string;
+}
+
+// Interfaz que describe las propiedades que tendrá un Ticket una vez en la BBDD.Hereda de Document
+interface TicketDoc extends Document {
+   title: string;
+   price: number;
+   userId: string;
+   version: number;
+}
+
+Dado que hay un bug que se resuelve en Mongoose 6+ tengo que usar ts-ignore:
+ticketSchema.set('versionKey', 'version');
+// @ts-ignore
+ticketSchema.plugin(updateIfCurrentPlugin);
+
+Fijate como con schema.set('oldProp','newName') podria renombrar propiedades. 
+
+					VIDEO 388 TESTING OOC
+
+Las nuevas versiones de jest no dejarán usar done() y return.O devuelvo la Promise o uso la callback.Con el return de la Promise me valdrá:
+
+it('implements Optimistic Concurrency Control or OOC', async () => {
+   // create an instance of a ticket
+   const ticket = Ticket.build({
+      title: 'concert',
+      price: 5,
+      userId: '123'
+   });
+
+   // save the ticket to the database
+   await ticket.save();
+
+   // fetch the ticket twice, es solo buscarlo,asin
+   const firstInstance = await Ticket.findById(ticket.id);
+   const secondInstance = await Ticket.findById(ticket.id);
+
+   // make two separate changes to the tickets we fetched
+   firstInstance!.set({ price: 10 });
+   secondInstance!.set({ price: 15 });
+
+   // save the first fetched ticket
+   await firstInstance!.save();
+
+   // save the second fetched ticket and expect an error
+   try {
+      await secondInstance!.save();
+
+   } catch (err) {
+      return;
+   }
+   // forma dos
+   await expect(secondInstance!.save()).rejects.toThrow();
+
+   throw new Error('Should not reach this point');
+});
+
+Fijate que ahora ya se puede hacer un await expect si es una Promise:
+await expect(secondInstance!.save()).rejects.toThrow(); <- espero que esa promesa falle.Interesante.
+
+					VIDEO 389 ONE MORE TEST
+
+Actualmente no estamos testeando que el numero del campo version realmente incremente en uno.
+
+   const ticket = Ticket.build({
+      title: 'concert',
+      price: 20,
+      userId: '123'
+   });
+
+   await ticket.save();
+   expect(ticket.version).toEqual(0);
+   await ticket.save();
+   expect(ticket.version).toEqual(1);
+   await ticket.save();
+   expect(ticket.version).toEqual(1); 
+
+Puedo incluso cambiar alguno y ver que lo incrementará el sólo
+Expected: 1
+Received: 2
+
+Ahora que ya tenemos implementada la OCC iremos al common module y agregaremos este campo 'field' en todos los eventos.
+
+				VIDEO 390 WHO UPDATES VERSIONS?
+
+

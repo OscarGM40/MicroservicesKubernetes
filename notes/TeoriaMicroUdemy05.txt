@@ -1,0 +1,632 @@
+						SECCION 13 CREATE  READ UPDATE DESTROY SERVER SETUP
+
+			VIDEO 254 TICKETS SERVICE OVERVIEW
+
+Como rutas va a tener:
+Route   		      Method        Body 						  Goal
+/api/tickets       GET					-									GetAll Tickets
+/api/tickets/:id   GET          -                 Get One Ticket
+/api/tickets      POST        {title:"",price:""}  CREATE A TICKET
+/api/tickets      PUT         {title:"",price:""}  UPDATE A TICKET
+
+Hay un motivo por el que pasar el precio como string.
+Este servicio tendrá su propia copia de MongoDB con la Collection Tickets(guardaré {title,price,userId}
+
+La creación de este servicio va a ser muy similar al auth service:
+
+1 crear package.json && instalar dependencias
+2 crear el Dockerfile
+3 crear el index.ts que arranca el proyecto
+4 construir la imagen && pushearla a DockerHub
+5 escribir el k8s file para el deployment y service
+6 actualizar el skaffold.yaml para el sync 
+7 escribir el kj8s file para el service y deploy de su MongoDB
+
+Fijate que podemos reutilizar los tres primeros pasos desde 'auth'
+
+						VIDEO 255 PROJECT SETUP
+
+Tal como hemos acordado hago un copy/paste de lo que manda Stephen.Corrigo lo necesario y hago el npm install.Ahora ya estoy en el paso 4 asi que hay que crear el buil y pushearlo.
+NOTA: obviamente Google Cloud lo está haciendo por mi de momento,pero podré usar mi docker registry en cuanto quiera.Nevermind,I've to exec:
+>docker build -t oscargm40/namethatIwant . <- recuerda el punto
+>docker push oscargm407nameofthelocalimagetopush
+
+		VIDEO 256 CORRECCIÓN ERROR SIGNATURE TS ERROR
+
+globalThis has no index signature TS Error
+In the upcoming lecture (and later with the orders and payments services) you may end up seeing a TS error like this in your test/setup.ts file:
+
+Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.ts(7017)
+
+This is caused by a recent change in the @types/node library which is a dependency of ts-node-dev.
+
+To fix, find the following lines of code in src/test/setup.ts:
+
+declare global {
+  namespace NodeJS {
+    export interface Global {
+      signin(): Promise<string[]>;
+    }
+  }
+}
+change to:
+
+    declare global {
+      var signin: () => Promise<string[]>;
+    }
+			VIDEO 257 RUNNING THE TICKET SERVICE
+
+De nuevo copio un depl.yaml en vez de copiar todo y sustituyo lo necesario
+NOTA: como el microservicio va a gestionar autenticación voy a necesitar el secreto JWT_KEY.
+Hago lo mismo para el auth-mongo-srv.
+Por último hago un restart de skaffold dando tiempo para que pare los pods,etc.. Recuerda que estamos apuntando mal con la MONGO_URI.Hay que cambiar eso
+
+			VIDEO 258 NEW MONGO CONNECTION URI
+
+En vez de hardcodear la uri como hemos hecho vamos a pasarla como una env a cada depl.yaml.Empecemos por el tickets-depl+srv.yaml:
+    env:
+      - name: MONGO_URI
+        value: 'mongodb://tickets-mongo-srv:27017/tickets'
+      - name: JWT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: JWT_KEY
+
+* sólo es añadir otra entrada con las props env.name y env.value.Si fuera algo más privado deberia crear un secret,pero no lo es en realidad.
+
+Para acceder a esa env es atraves del process,sin embargo typescrit se quejará asi que puedo usar el not null assert operator.
+
+				VIDEO 260 SETTING TESTS
+
+ Recuerda que estoy testeando las rutas.Para ello creo el folder routes y en él otro llamado __test__.Dentro creo un archivo name.test.ts:
+Para levantar los test con npm run test:
+
+it('can only be accessed whether the user is signed in', async () => {
+   
+})
+
+it('returns an error if an invalid title is provided', async () => {
+
+})
+
+tickets> npm run test
+
+				VIDEO 261 CREATING THE ROUTER 
+
+IMPORTANTE: tengo el load balancer en el servicio del Ingress:
+
+oscar@acer-linux:~$ k get services -n ingress-nginx
+NAME                                 TYPE           CLUSTER-IP   EXTERNAL-IP    PORT(S)                      AGE
+ingress-nginx-controller             LoadBalancer   10.60.1.30   35.233.85.47   80:32413/TCP,443:31337/TCP   75d
+ingress-nginx-controller-admission   ClusterIP      10.60.3.93   <none>         443/TCP                      75d
+
+Para pasar nuestro primer test vamos a crear un simple endpoint que devuelva hardcodeado un statusCode de 200.Fijate en el uso de res.sendStatus(200) que simplemente devuelve el statusCode que yo quiera.
+Muy útil para testeo:
+
+router.post('/api/tickets', (req:Request, res:Response) => {
+   res.sendStatus(200);
+})
+
+export { router as CreateTicketRouter }; <- fijate como renombre 'on the fly' lo que exporta.Muy interesante.
+
+Ya deberia pasar este test:
+
+it('has a route handler listening to /api/tickets for POST requests', async () => {
+   const response = await request(app)
+     .post('/api/tickets')
+     .send({ });
+
+     expect(response.status).not.toEqual(404);
+
+})
+			
+				VIDEO 262 ADDING AUTH PROTECTION
+
+Vamos a crear otro test que simplemente haga una peticion post al endpoint recien creado.Lamentablemente ahora arroja un 200,pues lo acabamos de crear,y está completamente abierto.No queremos eso,no queremos que cualquiera pueda crear un ticket,asi que hay que securizarlo.El test deberá arrojar un 401 en vez de un 200.
+
+NOTA: es lo mismo encadenar el expect asi,de forma más corta:
+   await request(app)
+     .post('/api/tickets')
+     .send({ })
+     .expect(201);
+que hacer el const response .... expect(response.status).not.toEqual(403.1e4) <- versión para asintos asintícos.
+
+IMPORTANTE: el test falla estrepitosamente arrojando un 200,lo cual es lógico ya que no hemos implementado nada y el endpoint es inseguro.
+Recuerda que ya tenemos en nuestra libreria middlewares para mirar por el token.En concreto el current-user.ts miraba por la incoming request y miraba si hay un req.session.jwt.Si si lo hay lo fijabamos en la propiedad que nos inventabamos req.currentUser para tener vision sobre ella en todo el backend.
+El otro middleware require-auth simplemente arroja un NotAuthorizedError en base a si existe req.currentUser.Ambos middlewares están ya en mi módulo npm .Asi pues implemento en toda la app el middleware currentUser(que no es el bloqueo):
+* En el index.ts
+app.use(
+  cookieSession({
+    signed:false,
+    secure:process.env.NODE_ENV !== 'test'
+  })
+)
+
+// MIddlewares co-dependientes de los de arriba 
+app.use(currentUser) <- en cuanto lo implemente comprobará cada request y meterá en el payload el token.
+
+* Fijate que este middleware necesita el de las cookies.
+Ahora implemento en la ruta que quiera(de momento en la única que hay) el que si que lanza el error si no viene la propiedad req.currentUser(que solo puede venir si hay un token),dado que es el que securiza la app.
+
+router.post('/api/tickets', requireAuth , (req:Request, res:Response) => {
+   res.sendStatus(200);
+})
+
+Ahora ya me pasa el test que espera que el statusCode sea un 401,lo cual significa que no se aceptan peticiones en ese endpoint sin autenticarse antes, pues lanza mi CustomError.
+
+			VIDEO 263 FAKING AUTHENTICATION DURING TESTS
+
+Recuerda que hemos creado en el setup.ts de los test un método sign-in que me autoregistraba:
+
+declare global {
+  namespace Node {
+    interface Global {
+     signin():Promise<string[]>
+     }
+  }
+}
+
+global.signin = async () => {
+   const email = 'test@test.com';
+   const password = 'password';
+
+   const response = await request(app)
+      .post('/api/users/signup')
+      .send({
+         email,password
+      })
+      .expect(201);
+
+   const cookie = response.get('Set-Cookie');
+      
+   return cookie;
+}
+Sin embargo el servicio 'tickets' no va a tener acceso a '/api/users/signup/'.Podriamos tratar de conectar con el servicio 'auth' durante el testeo,pero los test deben ser aislados e independientes.
+Ticketing no debería necesitar de auth... 
+Sin embargo fijate que la función lo único que hace es devolver la cookie(que tendrá el jwt dentro).
+
+Entonces lo que vamos a hacer es fakear esa cookie,asi que voy a la app,me registro y en los headers de la petición me traigo el contenido de la cookie(quitando el express:sess=)
+Voy a base64decode.org y lo pego,lo decodifico y debería ver el token.
+
+* Tras decodificar en la web la cookie...
+{"jwt":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYxMDc5OTY2MzJmMWVjMDAxOTlkODQ2YiIsImVtYWlsIjoiZnNka2xmc2tAc2psZmtzai5jb20iLCJpYXQiOjE2Mjc4ODc5NzV9.Im69-d292RcgRtqhMoRGOUUk3moBrCZQP_OZvIPcW2Y"}
+
+Con esto ahora vamos a rediseñar el método global.signin.
+Nota: iat stands for issued at time.
+
+		VIDEO 264 BUILDING A SESSION
+
+Los pasos a seguir serán estos:Fijate que ya no devolveré una Promesa sino un Array de Strings:
+declare global {
+  namespace Node {
+    interface Global {
+      signin():string[];
+}  }  }  
+
+global.signin = () => {
+   // Build a JWT payload { id, email}
+   const payload = {
+      id:'1hkh54kk45',
+      email: 'test@example.com'
+   }
+   // Create de JWT with jwt.sign
+   const token =   jwt.sign(payload,process.env.JWT_KEY!)
+
+   // Build session Object { jwt: MY_JWT}
+   const session = {jwt: token}
+   
+   // Turn that session into JSON
+   const sessionJSON = JSON.stringify(session)
+
+   // Take JSON and encode it as base64
+   const base64 = Buffer.from(sessionJSON).toString('base64'); 
+   
+   // return a string that's the cookie with the encoded data
+   return [`express:sess=${base64}`];  
+}
+
+Con todo esto ya debería pasar el test
+  const response = await request(app)
+    .post('/api/tickets')
+    .set('Cookie',global.signin())
+    .send({})
+     expect(response.status).not.toEqual(401);
+    console.log(response.status)
+})
+Da un 200 ,asi que estamos autenticados
+
+		VIDEO 265 TESTING REQUEST VALIDATION 
+
+Vamos a probar los tests que obligan a proveer un title y un price.Stephen me hace recordar que tengo un middleware en el common module que se llama validate-requests.ts y que simplemente lanza un RequestValidationError si hay errores. 
+Este middleware custom a su vez lanza un 400(es una clase que hereda de custom-error) .Vamos a crear ya la lógica tanto mandando un string vacío como no mandando un titulo y para el precio mandando un negativo o no mandandolo
+
+  it('returns an error if an invalid title is provided', async () => {
+    await request(app)
+      .post('/api/tickets')
+      .set('Cookie',global.signin())
+      .send({
+        title:'',
+        price: 10
+      }).expect(400)
+
+    await request(app)
+      .post('/api/tickets')
+      .set('Cookie',global.signin())
+      .send({
+        price: 10
+      }).expect(400)
+})
+
+it('returns an error if an invalid price is provided', async () => {
+
+    await request(app)
+      .post('/api/tickets')
+      .set('Cookie',global.signin())
+      .send({
+        title:'titulo',
+        price: -10
+      }).expect(400)
+
+    await request(app)
+      .post('/api/tickets')
+      .set('Cookie',global.signin())
+      .send({
+        title:'',
+      }).expect(400)
+})
+
+			VIDEO 266 VALIDATING TITLE AND PRICE
+
+Fijate que estoy usando la misma libreria express-validator que en el MERN UdemySocialNetwork pero en la versión 6.12 en vez de la 5.3.1
+Asi que me va a valer para cualquier app.
+Importante,para usar esta libreria importo en los routers:
+import { body } from 'express-validator'
+* se usa body para validar el body de la petición
+
+Fijate que consta de dos partes,la primera es crear la lógica pero además hay que capturar los errores.En esta aplicación tenemos el middleware que ya he mencionado que simplemente lanza un error si hay errores asi que hay que ponerlo también despues de la validación del express-validator:
+
+import { body } from 'express-validator';
+import { requireAuth,validateRequest } from '@oscargmk8s/common';
+
+router.post('/api/tickets', requireAuth ,
+[
+   body('title').not().isEmpty().withMessage('Title is required'),
+   body(('price').not().isEmpty().withMessage('Price is required'),
+   body('price').isFloat({ gt:0 }).withMessage('Price must be greater than 0')
+],validateRequest, (req:Request, res:Response) => {
+   res.sendStatus(200);
+})
+
+El middleware es el validateRequest.Fijate como va tomando todo forma.Con esto pasarán los dos tests.
+
+			VIDEO 267 REMINDER ON MONGOOSE WITH TYPESCRIPT
+
+Vamos a realizar el último test:
+it('creates a ticket with valid parametres ', async () => {
+  await request(app)
+    .post('/api/tickets')
+    .set('Cookie',global.signin())
+    .send({ 
+      title:'titulo',
+      price: 20
+    })
+    .expect(201)
+})
+* Sin embargo queremos asegurarnos que lo ha guardado en la base de datos.Para ello vamos a tener que crear el ticket Model.Crear un Model en Typescript puede ser un poco confuso.
+
+Vamos a seguir la misma forma que hicimos para el User Model en la authque consistia en 3 interfaces:
+
+1- Interface TicketAttrs(properties that are required to build  a new Ticket) Seran title,price y userId
+2- Interface TicketDoc(properties that a Ticket{a document} has)Serán title,price,userId,createdAt,updatedAt,...Fijate que no es lo mismo las que se necesitan para crear que las que tendrá en la BBDD.
+
+3- Interface TicketModel(Properties tied to the Model{ to the Collection })Será la función build.
+
+// Interfaz que designa las propiedade requeridas para crear un nuevo Ticket.Es una simple interfaz para el tipado
+interface TicketAttrs {
+   title: string;
+   price: number;
+   userId: string;
+}
+
+// Interfaz que describe las propiedades que tendrá un Ticket una vez en la BBDD.Hereda de Document
+interface TicketDoc extends Document {
+   title: string;
+   price: number;
+   userId: string;
+}
+
+// Interfaz para el Model/Coleccion.Extiende de Model<T extends Document> donde T será la interface de arriba que heredó de Document
+// Aqui solo digo que implemetaré el método build,pero ese método lo desarrollo más abajo y como estático además
+interface TicketModel extends Model<TicketDoc> {
+   build(attrs: TicketAttrs):TicketDoc;
+}
+
+const ticketSchema = new Schema<TicketDoc>({
+   title: {
+      type: String,
+      required: true,
+   },
+   price: { 
+      type: Number,
+      required:true
+   },
+   userId: {
+      type: String,
+      required:true
+   }
+},{
+   versionKey:false,
+   toJSON:{
+      transform(doc,ret){
+         ret.id = doc._id;
+         delete ret._id;
+      }
+   }
+});
+
+// ojo con usar arrow funcions y perder el contexto
+// vamos a crear el método build para tener autocompletado
+ticketSchema.statics.build = (attrs: TicketAttrs) => {
+   return new Ticket(attrs);
+}
+
+
+const Ticket = model<TicketDoc,TicketModel>('Ticket',ticketSchema);
+
+export { Ticket };
+
+Puedo ver que es bastante más sencillo de lo que parece la primera vez.
+
+			VIDEO 269 CREATING A TICKET VIA ROUTE HANDLER
+
+
+El software de grado profesional es un software probado. El software probado tiene dos componentes principales fuera del código funcional: Las pruebas y la observabilidad.  Las pruebas demuestran que el software está listo para ser desplegado - antes del despliegue. La observabilidad demuestra que el software funciona como se espera después del despliegue (y ciertamente puede/debe ser utilizado en la puesta en escena como una comprobación previa al despliegue).
+
+Si no estás interesado en estos dos aspectos del software de grado profesional, te preparas para noches muy largas, fines de semana con muchos buscapersonas, y la solución de problemas que se prolonga en la oscuridad indefinidamente - y honestamente un equipo que se sentirá frustrado contigo personalmente. 
+
+Vamos a tomar una aproximación simple para comprobar que se guardó en la base de datos.Simplemente contaremos los documentos
+
+it('creates a ticket with valid parametres ', async () => {
+  // add in a check to make sure a ticket was saved 
+  // dado que cada test se resetean las colecciones deberia haber 0
+  let tickets = await Ticket.find({})
+  expect(tickets.length).toEqual(0);
+  
+  await request(app)
+    .post('/api/tickets')
+    .set('Cookie',global.signin())
+    .send({ 
+      title:'titulo',
+      price: 20
+    })
+    .expect(201)
+
+  tickets = await Ticket.find({})
+
+  expect(tickets.length).toEqual(1);
+  expect(tickets[0].price).toEqual(20);
+     
+})
+
+Fijate que haber echo estos tests me asegura que este microservicio funciona bien,asi como sus endpoints,la seguridad etc,... y que no ha sido mucho tiempo realmente.Realizar test es una parte fundamental del desarrollo de una aplicación.Recuerda el software probado y la observabilidad.
+
+					VIDEO 270 TESTING GET  ROUTES
+
+Vamos a crear un par de tests para los get de los tickets:
+
+it('returns a 404 is the ticket is not found', async () => {
+   await request(app) 
+     .get('/api/tickets/sjkfddslkfjdlfkj')
+     .send()
+     .expect(404);
+})
+
+
+
+it('returns the ticket whether the ticket is  found', async () => {
+   //puedo guardar uno y tratar de pedirlo despues.Eso confirmará que se guardó!Hay mas opciones que esta
+   const title = 'concert';
+   const price = 20;
+
+   const response = await request(app)
+     .post('/api/tickets/')
+     .set('Cookie',global.signin())
+     .send( { title, price } )
+     .expect(201); //realmente no testeo esto
+
+   const ticketResponse = await request(app)
+     .get(`/api/tickets/${response.body.id}`)
+     .send()
+     .expect(200); // este si es el test
+
+   expect(ticketResponse.body.id).toEqual(response.body.id)
+   expect(ticketResponse.body.price).toEqual(response.body.price)
+})
+Al parecer con TDD se escriben todos los tests,no solo de uno en uno.
+
+			VIDEO 271 UNEXPECTED FAILURE!
+
+ Asi pues creamos la ruta y lamentablemente va a fallar:
+
+router.get('/api/tickets/:id', async (req:Request,res: Response) => {
+   const ticket = await Ticket.findById(req.params.id);
+   if(!ticket) {
+      throw new NotFoundError();
+   }
+   res.send(ticket);
+ })
+* Recuerda que puedo lanzar mi custom NotFoundError que lanzaba un statusCode 404.Debería pasar el test:
+
+ PASS  src/routes/__test__/new.test.ts (21.511 s)
+ FAIL  src/routes/__test__/show.test.ts (22.642 s)
+  returns a 404 is the ticket is not found
+
+  expected 404 "Not Found", got 400 "Bad Request"
+* The test issued a 400 BadRequest
+
+				VIDEO 272 WHY THAT ERROR
+
+Para ver ese error Stephen hace un minimo console.log en las dependencias del proyecto.No se recomienda cambiar nada en la carpeta node_modules,pero necesitamos ese console.log
+
+    console.log
+      {
+        errors: [
+          {
+            message: 'Something went wrong: Cast to ObjectId failed for value "sjkfddslkfjdlfkj" (type string) at path "_id" for model "Ticket"'
+          }
+        ]
+      }
+
+Ya sabemos que falló el casteo a ObjectId en el modelo Ticket ya que por la url van strings.
+
+Ahora se nos plantea qué solución tomar.Quizás usar un try/catch 
+
+			VIDEO 183 BETTER ERROR HANDLING
+
+Lo que vamos a hacer es agregar un simple console.error(error) al modulo common.Sin embargo,esto implicará hacer un npm run pub y actualizar las dependencias de los proyectos auth y tickets.
+
+>npm login <- recuerda hacer login
+common>npm run pub
+
+tickets> npm update @oscargmk8s/common 
+* El comando update siempre actualizará a la última versión disponible,no necesito decirle a cual.Irá a la última(claro que podria hacer un npm update @oscargmk8s/common@1.0.5 si por ejemplo quiero ir la 5).
+* Fijate en lo interesante del comando update.
+
+Al final usaré un custom error con express-validator que compruebe que el string es un ObjectId válido.Mirar por si da problemas aqui para quitarlo si es necesario.
+
+import { Types as MongooseTypes } from 'mongoose' 
+import { param } from 'express-validator';
+
+const router = express.Router();
+
+router.get('/api/tickets/:id',
+param('id').custom( (idValue) => MongooseTypes.ObjectId.isValid(idValue)).withMessage('id must be a valid Mongo ObjectId'),
+validateRequest, 
+ async (req:Request,res: Response) => {
+   const ticket = await Ticket.findById(req.params.id);
+
+Para testearlo vamos a crear un id válido:
+
+import mongoose from 'mongoose';
+
+it('returns a 404 is the ticket is not found', async () => {
+  const id =  new mongoose.Types.ObjectId().toHexString();
+   await request(app) 
+     .get(`/api/tickets/${id}`)
+
+Fijate como usa new mongoose.Types.ObjectId().toHexString() <- porque usa también toHexString()
+
+				VIDEO 274 INDEX ROUTE IMPLEMENTATION
+
+Ya hemos hecho crear un ticket y ver un ticket.Nos queda el index que lsta todos los tickets y actualizar un ticket.
+router.get('/api/tickets', async (req: Request, res: Response) => {
+   const tickets = await Ticket.find({});
+
+   res.send(tickets)
+  
+}
+
+				VIDEO 275 UPDATE TICKET IMPLEMENTATION
+
+Solo se va a poder actualizar un ticket si se está autenticado.Además deberá ser el dueño del ticket.
+Es por ello que testear el PUT va a ser crítico.La lógica de negocio debe ser correcta.
+ Empecemos por elprimero,el cual pasará ya que ni siquiera tenemos la ruta echa:
+
+test('should returns a 404 if the provided id does not exists', () => {
+      const id = new mongoose.Types.ObjectId().toHexString();
+      await request(app)
+      .put('/api/tickets/'+id)
+      .set('Cookie',global.signin())
+      .send({
+         title:'titulo',
+         price: 40
+      })
+      .expect(404);
+   })
+
+Los dos primeros se van a resolver con los middlewares que tenemos en nuestro módulo common:
+
+router.put('/api/tickets/:id', requireAuth, async (req: Request, res: Response) => {
+   const ticket = await Ticket.findById(req.params.id);
+   if(!ticket) {
+      throw new NotFoundError();
+   }
+
+   res.send(ticket)
+   
+})
+
+Para el tercero va a ser más complicado ya que para simular que otro usuario quiere actualizar un ticket que no es suyo esto nos molesta:
+
+global.signin = () => {
+   // Build a JWT payload { id, email}
+   const payload = {
+      id:'1hkh54kk45',
+      email: 'test@test.com',
+   }
+En la cookie siempre va a estar el mismo usuario,asi que no podemos hardcodear ese id.No vamos a tener problemas si queremos realizar más de una operació con el mismo id accediendo a la cookie,asi que podemos generarlo aleatoriamente:
+   test('should returns a 401 if the user is not the owner of the ticket', async () => {
+      // es un post para crear
+      const response = await request(app)
+      .post('/api/tickets')
+      .set('Cookie',global.signin())
+      .send({
+         title:'titulo created',
+         price: 44
+      })
+
+      //al ser ya random global.signin () seré otro user
+      const updated = await request(app)
+      .put(`/api/tickets/${response.body.id}`)
+      .set('Cookie',global.signin())
+      .send({
+         title:'titulo updated',
+         price: 40
+      })
+      .expect(401);
+     //debe seguir sin actualizarse 
+      expect(updated.body.title).toBe(undefined)
+   })
+   
+Creamos uno y tratamos de actualizarlo.Ya seremos otro usuario y fallará,cumpliendose el test.
+
+Para la parte donde enviamos inputs inválidos guardo la cookie:
+
+let cookie = global.signin();
+
+const createdTicket = await request(app).post('/api/tickets').set('Cookie',cookie).send({title:'titulo',price:10}) <- ni siquiera necesito un expect ya que solo quiero crear un ticket
+Ahora ya mando valores inválidos siendo el mismo usuario:
+await request(app).put(`/api/tickets/${createdTicket.body.id}`).set('Cookie',cookie).send({title:'',price:15}.expect(400) <- no puede ir un titulo vacio.
+
+Para que pase tengo que usar express-validator.Recuerda que en la version 7 sólo hay que traerse el body y usar un array como middleware:
+
+router.put('7api/ruta/', [ body("title").not().isEmpty().withMessage("title must be provided"), body("price").isFloat({ gt: 0}).withMessage("price must be greater than Zero"),.... asi por cada validación.
+
+El último test compruebe que realmente podamos actualizar el ticket si todo es correcto.
+
+			VIDEO 279 MANUAL TESTING
+
+Vamos a probar todo esto con Postman.Sin embargo,tengo que actualizar el ingress.yaml
+          - path: /api/tickets/?(.*) # nginx se pondrá delante y le hará proxy a la aplicacion web server express
+            pathType: "Prefix" # investigar los tipos
+            backend:
+              # serviceName: auth-srv # OJO CON LAS VERSIONES!!
+              # servicePort: 3000
+              service:
+                name: tickets-srv
+                port: 
+                  number: 3000
+          - path: /?(.*) # cogerá el resto de rutas,tiene que ir debajo de la anterior por especificidad
+            pathType: "Prefix"
+            backend:
+              service:
+                name: client-srv
+                port:
+                  number: 3000
+ Dado que la última es la menos especifica tengo que ir bajandola...
+
+Para crear más rutas en Postman tendré que  registrarme y logearme(puedo confirmarlo yendo a getcurrent user).Recuerda que la url es https://ticketing.dev/api....
+
+
+

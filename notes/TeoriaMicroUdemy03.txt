@@ -1,0 +1,918 @@
+			SECTION 9 AUTHENTICATION STRATEGIES AND OPTIONS
+
+		VIDEO 162 FUNDAMENTAL AUTHENTICATION STRATEGIES
+
+La autenticación de usuarios en microservicios es un 'problema sin resolver'.Hay varias maneras de hacerla,y ninguna es 'correcta'.
+
+Option 1:Individual services rely on the auth service
+La opcion numero 1 dejará todo en el Auth Service,cuando por ejemplo le vaya a preguntar el Orders Service si ese usuario puede comprar un ticket hara una petición sincrona al Auth Service,mandandole el token de ese usuario,la cookie,etc... lo que sea necesario.Toda la lógica estará en el auth service.Recuerda que en microservicios una sync request significa que es una petición directa de un servicio a otro,mientras que una petición asincrona sería pedirlo a los buses de eventos,etc...Seguiremos teniendo que esperar por esa petición sincrona/directa.
+Si usamos esta aproximación el auth service será un SPOF,con lo que si cae,nuestro Orders Service quedará inservible.
+
+Option 1.1:Individual services rely on the auth service as a gateway(como puerta de entrada)
+La opción 1.1 es muy parecida,sin embargo,el auth service se pondrá en cada entrada de una petición,como un middleware,en vez de ser el Orders service el que hace una petición directa
+De nuevo el auth es un SPOF ya que todo pasa por él
+
+Option 2:Individual services know how to authenticate a user
+Con la opción 2 vamos a 'enseñar' a cada servicio a decidir cuando un usario está autenticado o no.
+En este escenario no existen dependencias ni SPOF,sin embargo existe una clara duplicación de código en cada servicio,pero esto no es importanteSi que otros 'downsides' que veremos y que explican porque esto es un desafio en una arquitectura de microservicios.
+
+		VIDEO 163 HUGE ISSUES WITH AUTH STRATEGIES
+
+Recuerda que el flujo de autenticación es: el usuario manda su pass y email,si es todo correcto le daremos un token.Bien,este token va a permitir a ese usuario realizar cualquier acción,en cualquier servicio.Esto es crítico,el usuario tendra total control sobre todos los servicios que integren la opción 2
+Incluso en el escenario que un admin baneara a ese usuario,aún podría acceder a otros servicios,pues sigue teniendo el token en ese servicio.
+Iremos con la opción 2,para seguir con la idea de tener servicios independientes.
+Es importante entender que yo podría tener un montón de comunicación asíncrona en mis microservicios pero también puedo usar comunicación síncrona entre unos pocos servicios,es decir,que puedo usar un híbrido.No hay reglas que me obliguen a usar un tipo de comunicación al 100%.
+
+				VIDEO 165 SOLVING ISSUES
+
+El gran cambio que vamos a hacer es enviar un token válido por sólo 15 minutos.JWT permite realizar esto fácilmente.
+Está vez,si el token tiene más de X minutos,irá al authService,que tiene la lógica para refrescar ese token,y de paso mirar a ver si se le baneó a ese usuario.
+Aun quedará una ventana en la que el usuario podría haber sido baneado y seguirá autenticado con ese token de corta duración,con lo que tendría acceso por unos minutos.
+Esto lo vamos a solucionar facilmente,ya que el auth service va a emitir un evento userBanned cuando banee a un usuario,y el servicio ordersService lo escuchará cada vez que necesite refrescar el token,es decir que persistiremos los datos de ese evento sólo 15 minutos.
+Al final vamos a hacer que cada servicio tenga la lógica para inspeccionar la validez del token y decida si el usuario esta autenticado.
+
+		VIDEO 166 COOKIES VS TOKENS
+
+Hay algunas diferencias entre las cookies y los tokens.Las cookies pueden mover cualquier tipo de dato entre el navegador y el servidor,además son manejadas por el browser automáticamente.Son un mecanismo de transporte.
+Por otro lado,los token son un mecanismo de autenticación,también almacenan cualquier dato,pero lo tenemos que manejar manualmente.Ver imagen
+
+	VIDEO 167 FINAL STEPS BEFORE IMPLEMENTING AUTH MECHANISM
+
+Los requerimientos del mecanismo de autenticación son:
+-Debe ser capaz de darnos detalles sobre el usuario
+-Debe ser capaz de manejar información sobre la autorización
+-No debe requerir ningun tipo de backing data store
+-Debe ser entendible entre los diferentes lenguajes
+-Debe ser resistente al hackeo
+
+JWT cumple todas!Asi que seguiremos por ese camino
+
+		VIDEO 168 ISSUES WITH SERVER SIDE RENDERING
+
+Es importante que entienda que la app de React es una 'server side rendering' app.En la primera petición GET que haga el cliente ya hará alguna petición y enviará toda la data.El propósito principal de que vaya a ser una app server side es la optimización del SEO,haciendo que la página no sea renderizada en el browser.
+Para ello vamos a usar un framework REACT llamado NextJS.Con este tipo de renderizado por parte del servidor tengo que conocer la auth info desde la primera petición.
+Esto es un problema,ya que en la primera petición realmente no se puede customizar nada,es sólo HTML,no se puede procesar JS aún.
+Esto nos deja una única opción,que es usar una cookie.A través de una cookie es la única forma de comunicar el navegador con el server en la primera petición
+Por todo esto decidimos que usaremos un JWT pero lo mandaremos en una cookie.
+
+			VIDEO 169 COOKIES AND ENCRYPTION
+
+Vamos a usar un módulo npm llamado cookie-session.Es un middleware.Permite almacenar información en la misma cookie,desde ambos lados,cliente y ervidor.
+Este módulo esta diseñado especificamente para que no se tenga que usar backend data store.
+Las cookies pueden ser dificiles de manejar en varios lenguajes porque a menudo tienen parte de su información encriptada de alguna manera.
+Cookie-session permite encriptar la información que irá en la cookie.
+Sin embargo tendremos que asegurarnos que el método de encriptación que usemos sea válido en los lenguajes de backend que utilice toda la app.
+Es por todo esto que al final no vamos a encriptar la cookie,ya que un jwt es resistente por naturaleza y si encriptamos la cookie tendremos problemas en escenarios reales.
+Si me es muy molesto puedo encriptar la cookie,pero el jwt es lo suficientemente robusto para no tener que hacer esto.
+
+			VIDEO 170 ADDING SESSION SUPPORT
+
+Vamos pues a instalar esta libreria,sin embargo esta libreria no tiene soporte nativo para typescript asi que instalaremos un archivo de definiciones de tipo para TS. 
+>>npm i cookie-session @types/cookie-session
+
+En el index importo la libreria:
+import cookieSession from 'cookie-session';
+
+Lo uso como middleware,es un método que recibe un objeto de configuración como argumento.
+Nota: por defecto el servidor express no va a confiar en el proxy, y el nginx está haciendo de proxy.Es decir, express está detrás del proxy nginx(es esté el que esta primero).Necesitamos que express confie en el proxy:
+>>app.set('trust proxy',true);
+
+El middeware con el objeto de configuración queda así:
+app.use(
+  cookieSession({
+      signed:false,
+      secure: true, //solo bajo https
+	    })
+	)
+Fijate que cuando se está refiriendo al proxy se refiere a lo que está delante(primero el nginx,despues la app de react,luego está haciendole proxy).
+
+			VIDEO 171 GENERATING JWT
+
+En este video vamos a empezar a generar el token y almacenarlo en la cookie.También vamos a usar una libreria,hay muchas asi que hay que tener cuidado con los nombres y los guiones.De nuevo la libreria no tiene soporte nativo para typescript asi que instalamos el archivo de definición de tipos también:
+>>npm i jsonwebtoken @types/jsonwebtoken 
+
+Son unos módulos muy ligeros así que la instalación será rápida.
+
+Al usar esta libreria hay que tener dos cosas en cuenta:
+En el signup será donde creemos el token.
+import jwt from 'jsonwebtoken';
+
+jwt.sign(payload,secret,[callback]
+
+La función va a pedir un payload(payload=carga útil) y un secretKey,el cual será necesario para tareas de desincriptación también.
+ const userJwt = jwt.sign({
+         id: user.id,
+         email:user.email
+    },'kubernetes');
+Nota: cuando se le provea al método de una callback será una funcion asincrona,mientras no lleve callback es un método sincrono.El jwt es un string
+Lo almacenamos en la cookie con el objeto session:
+     // Store it on session object
+	       req.session = {
+              jwt:user1Jwt
+           };
+Podiamos haber usado el non-null operator:
+req.session!.jwt! = userJwt; <- tiene buena pinta
+
+Si ahora voy a Postman y lo testeo veré que necesito usar el protocolo https ya que por http no voy a recibir cookies(además hay una opción en preferencias para poner en OFF/ON la SSL verification.Debe estar en OFF pues no tenemos un certificado SSL(Secure Sockets Layer)
+
+			VIDEO 172 JWT SIGNING KEYS
+
+En realidad lo que tengo en la cookie es el token pero está codificado en base64,aún me falta decodificarlo(puedo comprobarlo usando cualquier conversor web como https://www.base64decode.org/ con el string que hay en la cookie)Importante,no llevo todo el objeto a jwt.io,sólo el valor del token(ver video si es necesario)
+Con ese valor(no el objeto entero,solo el token) ahora si que puedo ir a la web jwt.io por ejemplo y decodificarlo junto con la semilla o signing key y veré el payload de nuevo(la prop iat es issued at time y hace referencia a cuando fue creado el token).
+
+En cuanto a esa signing key tenemos un problema y es que los demás servicios tienen que tener conocimento de ella.De alguna forma tenemos que encriptar esa palabra  y compartirla con todos los servicios.
+
+			VIDEO 173 SECURELY STORING SECRETS WITH K8S
+
+Hay una feature especialmente diseñada en Kubernetes para compartir información secreta entre las diferentes partes de nuestra aplicación.
+Esta feature es el objeto Secret.Recuerda que un objeto es cualquier cosa que cree en Kubernetes(luego vivirá en el cluster)
+Dentro de un objeto Secret puedo almacenar pequeños pares de clave-valor,con lo que crearemos un Secret con el key-value JWT_KEY='afsfda'
+Una vez que cree el Secret tengo que cargarlo en los pods,tendré que hacerlo como variables de entorno,asi que aprenderemos a crear y acceder a Secrets y a acceder a las variables de entorno de un Pod.
+
+			VIDEO 174 CREATING AND ACCESING SECRETS
+
+Para crear un secreto esta es la sintaxis del comando que voy a usar:
+>k create secret <secretType> <secretName> --from-literal=key=value
+Con esto en mente creo pues un secreto con la key value jwt : asdf
+>>kubectl create secret generic jwt-secret --from-literal=jwt=asdf
+
+Nota: hay varios tipos de secretos que puedo crear.Un secreto generic sirve para cualquier propósito y albergará cualquier tipo de información,sin embargo,hay secretos para autenticación u otros servicios que serán de otro tipo
+
+Fijate también que hasta ahora habiamos creado ficheros para crear objetos Kubernetes pero esta vez usamos linea de comandos.Esto es así porque no queremos que haya un fichero por ahi con el secreto.
+Además fijate también que habría que hacer esto por cada cluster nuevo ,pues esto sólo vale para este cluster.Esta aproximación es más para un entorno de desarrollo,para producción se recomienda crear archivos.
+Es buena practica crear un archivo con los comandos cli para secretos si no uso archivos.
+
+Al final usaré mi propio par de claves-valor:
+>kubectl create secret generic jwt-secret --from-literal=JWT_KEY=kubernetes <- acuerdate del cambio en la clave sobre todo.
+Puedo ver los secretos con :
+>k get secret
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/ticketing$ k get secret
+NAME                  TYPE                                  DATA   AGE
+default-token-nbn2r   kubernetes.io/service-account-token   3      35d
+jwt-secret            Opaque                                1      76s
+Puedo ver como ya hay alguno como el token de autenticación
+
+Ahora falta pasarle esta variable en los pods,para ello iré al archivo que hace el deploy y añadir algunas opciones para informar a Kubernetes que cada vez que cree ese pod quiero que acceda a ese secreto y las agregue a las variables de entorno de ese pod. 
+Para ello usaré la propiedad env en cada posicion del arreglo de containers:
+
+    spec:
+      containers:
+        - name: auth
+          image: us.gcr.io/ticketing-dev-313817/auth
+         #imagePullPolicy: Never
+		  env: 
+		    - name: JWT_KEY
+			  valueFrom:
+			    secretKeyRef:
+				  name: jwt-secret
+				  key: JWT_KEY
+
+Fijate que el secreto está en el cluster asi que da igual desde que ordenador me conecte,mientras sea a ese cluster,aun asi deberia crear un archivo de configuración con ese secreto la proxima vez.
+Nota: hay que decirle la key porque dentro de la secret jwt-secret podría tener varios pares de clave-valor.El primer name es para el Pod,por motivos de consistencia se llama igual,pero env.name no tiene por que coincidir con env.valueFrom.secretKeyRef.key.Fijate que env es un array.
+Un apunte importante es que si el secreto no existe kubernetes no va a arrancar ese pod(k describe pod).
+Fijate que el tipo de error era:   CreateContainerConfigError
+
+		VIDEO 175 ACCESING ENV VARIABLES IN A POD
+
+Ya no queremos la semilla hardcodeada en el signup.ts.Para acceder a una variable de entorno en Node se usa el objeto process.env.variableNameSin embargo tan pronto como llamemos a process.env.JWT_KEY typescript se quejará pues no sabe si está definida o no.
+Es buena idea chequear que la variable está definida tan pronto como arranquemos la aplicación,asi pues voy al index.ts:
+
+const start = async () => {
+  if (!process.env.JWT_KEY) 
+   {
+     throw new Error('JWT_KEY must be defined');
+   }
+    try {
+    await mongoose.connect("mongodb://auth-mongo-srv:27017/  ....
+
+Lanzo un error desde el primer momento,ya que debe estar definida.
+Ahora ya puedo usar el operador non-null assertion:
+
+ const userJwt = jwt.sign(
+   {
+     id: user.id,
+     email:user.email
+   }
+  ,process.env.JWT_KEY!); 
+
+Este operador indica a TS que esa variable no puede ser nula o undefined en tiempo de ejecución,lógicamente,me tendré que ocupar con código de que sea así.
+
+			VIDEO 176 COMMON RESPONSE PROPERTIES
+
+Aún tenemos alguna cosa por pulir.Al resgistrar un usuario puedo ver como estoy devolviendo todo el modelo.Esto no es muy seguro ya que estoy exponiendo el email,el id y la password.
+Puede que no parezca importante esto,pero debo recordar que cada servicio puede usar un lenguaje diferente,asi pues MongoDb por ejemplo guarda el id como _id,esto lo puedo ver en la petición a Postman.
+Además de no exponer la password tenemos que cambiar eso,devolviendo sólo 'id' como propiedad.
+
+		VIDEO 177 FORMATTING JSON PROPERTIES
+
+Tenemos que buscar una forma razonable de remapear esas propiedades.Para ello hay que entender un par de conceptos sobre como Javascript convierte los objetos a JSON:
+
+>const personTwo={name:'Alex',toJSON(){return 1;}};
+
+>JSON.stringify(personTwo);
+>"1" <- fijate que en vez de devolver todo el objeto como un JSON ha devuelto el retorno de la llamada a la función.
+Esto es básicamente lo mismo que definir el típico ToString() en otros lenguajes.En Js en el momento que lo implemente devolverá lo que yo le programe.
+
+Podemos aprovecharnos de esto y devolver cualquier cosa que queramos para ello vamos a cambiar cosas en el modelo.Primero que todo en Mongoose el metodo toJSON funciona un poco diferente, de echo no es un método,es un objeto.Si hago click en el objeto podré ver su cadena de herencia:
+
+ interface ToObjectOptions {
+   /** apply all getters (path and virtual getters) */
+   getters?: boolean;
+   /** apply virtual getters (can override getters option) */
+   virtuals?: boolean;
+   /** if `options.virtuals = true`, you can set `options.aliases = false` to skip applying aliases. This option is a no-op if `options.virtuals = false`. */
+   aliases?: boolean;
+   /** remove empty objects (defaults to true) */
+   minimize?: boolean; ........more code.......
+
+En realidad lo único que me interesa es el método transform:
+ /** if set, mongoose will call this function to allow you to transform the returned object */
+     transform?: (doc: any, ret: any, options: any) => any;
+
+  toJSON:{
+     transform(doc,ret){
+       ret.id = ret._id;
+       delete ret._id;
+	   delete ret.password; 
+	   delete ret.__v; // versionKey:false también hace lo mismo
+	      }
+	   }
+
+				VIDEO 178 SIGNIN FLOW
+
+Ya hemos terminado con el signup o registro,asi que seguimos por el sigin o acceso.El usuario tendrá que cumplir ciertas reglas:
+1ª: el email deberá existir(mandaremos un error si no)
+2ª: compararemos las passwords almacenada y la proporcionada y deberán coincidir
+3ª: si todo coincide el usuario se considera logeado.Le mandaremos la cookie con el token.	
+
+app.post('/api/users/signin',
+[
+   body('email').isEmail().withMessage('Email must be valid'),
+   body('password').trim().notEmpty().withMessage('You must supply a password')
+], 
+ (req: Request, res: Response) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+      throw new RequestValidationError(errors.array());
+     }
+ });
+ Puedo ver perfectamente como ya tenemos el problema de replicación de data.Lo mejor es que usemos un middleware.
+De nuevo validamos los erroresy hacemos un pequeño test en Postman mandando un email y password inválidos a /ticketing.dev/api/users/signin 
+
+		VIDEO 179 COMMON REQUEST VALIDATION MIDDLEWARE
+
+Creo un nuevo archivo llamado validate-requests.ts en el folder de middlewares:
+Nota: un atajo importante es Mayusculas+End o Home y desde ahi puedo subir o bajar más lineas incluso. 
+Express distingue entre un middleware normal y uno para errores según el número de argumentos que la función acepte.  
+
+export const validateRequest = (
+   req: Request,
+   res: Response,
+   next: NextFunction
+ ) => {
+    const errors= validationResult(req);
+ 
+   if(!errors.isEmpty()){
+       throw new RequestValidationError(errors.array());
+   }
+   next();
+ };
+Recuerda que puede haber muchos middlewares,next() simplemente pasa al siguiente,claro que si sólo hay uno ya pasa al tercer argumento pero puede haber tantos middleware como desee.Una vez creado el middleware lo paso por referencia(ojo,por referencia):
+router.post('/api/users/signin',
+[
+   body('email').isEmail().withMessage('Email must be valid'),
+   body('password').trim().notEmpty().withMessage('You must supply a password')
+],
+   validateRequest,  <- va por referencia
+   (req: Request, res: Response) => {
+  });
+				
+				VIDEO 180 SIGNIN LOGIC
+
+Cuando esté tratando con usuarios y autenticación no debería devolver el máximo de información de vuelta,si no que debo ser muy cauto y tratar de devolver siempre el mínimo de información necesaria.Por ejemplo,si un usuario se valida con un email no existente no queremos enviarle de vuelta que el usuario no existe,simplemente debería decirle que el login es incorrecto y no dar información extra
+
+const existingUser = await User.findOne({ email: email})
+   
+    if(!existingUser){
+      throw new BadRequestError('Invalid credentials');
+	   }
+							    
+   const passwordsMatch = await Password.compare(existingUser.password,password);
+										    
+    if(!passwordsMatch){
+      throw new BadRequestError('Invalid credentials');
+   }
+Recuerda que la respuesta debe ser génerica y no dar información de más.
+	 
+				VIDEO 181 SIGNIN TESTS
+
+Primero que nada habrá que crear algun usuario válido.Despues hago las pruebas y deberia de darme mal las credenciales y devolverme la cookie con el token si son credenciales válidas.
+
+			VIDEO 182 CURRENT USER HANDLER
+
+La lógica del middleware consistirá en preguntar si el usuario actual tiene fijada la propiedad req.session.jwt.Si si la tiene además deberá ser válido el token.Si se cumple todo,se devolverá la información de ese token(el payload que está encubierto en el token)
+
+			VIDEO 183 RETURNING THE CURRENT USER
+
+Fijate que el operador '?' evaluará a true toda la expresión en caso de que no exista req.session,lo cual también contesta a la pregunta de si el usuario tiene req.session.jwt,pues ni siquiera tiene req.session definida:
+
+router.get('/api/users/currentuser', (req, res) => {
+   if(!req.session?.jwt) {
+     return res.send({currentUser:null});
+    }
+});
+
+ const payload = jwt.verify(req.session.jwt,process.env.JWT_KEY!);
+
+ Fijate que el operador ! indica que la propiedad no es nula a TS para que deje de molestar,mientras que el operador '?' se pregunta si la propiedad existe o no ,y en caso de ser nula ejecuta el código(? pregunta por la nulidad de una propiedad)
+
+Meto todo en un try/catch ya que el método verify suelta un error si no es exitoso.Ahora probamos con Postman a hacer una petición GET a https://ticketing.dev/api/users/currentuser 
+Nota: primero tendré que registrarme y logearme.Ten en cuenta que Postman envia automáticamente la cookie si el dominio coincide(https://ticketing.dev) entre peticiones.
+Esto lo puedo ver en el botón de cookies,y también la puedo borrar,logicamente.
+En definitiva cuando la aplicación de React reciba una respuesta como esta se entenderá que el usuario está autenticado y validado para esa app frontend:
+{
+    "currentUser": {
+      "id": "60d63ad7886a3f00197118e8",
+      "email": "user01@test.com",
+      "iat": 1624652506
+    }
+}
+
+			VIDEO 184 SIGNIN OUT
+
+Vamos a crear la lógica del 'signin out' enviando un header que va a decir al navegador del usuario que tire toda la información dentro de nuestra cookie,simplemente la dejaremos vacía.
+Esto limpiará el token con lo que cualquier sucesiva petición no enviará el token en la cookie.
+Para limpiar la cookie vamos a usar de nuevo la libreria cookie-session,si voy a la documentación de la librería en npm veré que es realmente fácil destruir una cookie(req.session= null).Asi pues voy al archivo signout.t:
+
+router.post("/api/users/signout",(req: Request, res: Response) => {
+     req.session=null;
+  // si hubiera problemas usar el metodo clearCookie(cookieName)
+  // res.clearCookie('express:sess');
+     res.send({});
+	});
+
+The logic is pretty straightforward
+
+			VIDEO 185 CREATING CURRENT USER MIDDLEWARE
+
+Nuestra aplicación va a crecer en número de servicios.Muchos de ellos van a necesitar comprobar si el usuario actual está logeado y por ello autenticado o no.
+También vamos a necesitar un middleware que extraiga el payload y lo meta en la propiedad req.currentUser para usarla despues donde se necesite.Asi pues vamos a crear estos dos middlewares mientras tenemos fresco el concepto de tokens,etc...
+Recuerda que if(!req.session?.jwt) hará expandirse ese condicional y comprobar tanto si req.session no es null como si tiene la propiedad jwt en caso de no serlo.
+
+import { NextFunction, Request, Response } from "express";
+import jwt from "jsonwebtoken";
+
+export const currentUser = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+	  ) => {
+	    // si el usuario está logeado extraemos la información a req.currentUser.Si no lo está es trabajo del otro middleware lanzar el error,no el de éste
+	  if (!req.session?.jwt) {
+	      return next();
+	    }
+
+	  try {
+         const payload = jwt.verify(req.session.jwt, process.env.JWT_KEY!);
+        req.currentUser = payload;
+  	    } catch (error) {}
+// haya un error o no queremos que avance asi que sacamos el next aqui
+	  next();
+}
+Fijate que Typescript se quejará por querer crear una propiedad nueva
+Tip: cuando quiera salir de un bucle if,por ejemplo debo añadir un return:
+function a(){
+if(!currenUser){
+  return res.send({msg:'no user'})
+  }
+} <- un return res.send dentro de un bloque hace salirse de la función en la que está el bloque en cuestión.Cuando quiera salir de una función se usa un 'return'.
+Nota: también puedo usar
+res.send();
+return; en lineas separadas.
+
+		VIDEO 186 AUGMENTING TYPES DEFINITIONS
+
+El problema es que queremos aumentar el número de propiedades que tiene el objeto req(fijate que es un objeto pre-built de JS/TS).Lógicamente,por defecto el objeto req no tiene la propiedad currentUser,asi que,¿como añadimos una propiedad a la definición de lo que es una request para el lenguaje?
+Lo primero será crear una interfaz que describa lo que es un 'payload' realmente:
+
+interface UserPayload {
+  id: string;
+  email:string;
+}
+
+Ahora vamos a decirle a TS que jwt.verify va a devolver este tipo.Esto lo hacemos con la keyword 'as'.
+
+const payload=jwt.verify(req.session.jwt,proccess.env.JWT_KEY!) as UserPayload; <- desde ahora TS sabe que es un Object con dos campos string
+
+Ahora falta decirle a TS que el objeto request puede tener opcionalmente definida una propiedad llamada currentUser y que si lo estuviera va a ser de tipo UserPayload.
+
+declare global {
+  namespace Express {
+    interface Request {
+      currentUser?:UserPayload;
+	}
+  }
+}
+Fijate que en el momento que defina está nueva propiedad se quitará el error.Fijate también que la interface no debe heredar ni nada,simplemente
+Fijate que meter una propiedad en el objeto request me dará visión sobre esa propiedad en cualquier petición,esto es muy útil.
+Con esto ya tenemos terminado el middleware que chequeará si el usuario esta autenticado y saca el payload a esa nueva propiedad del objeto request.Toca implementarlo en el route-handler del mismo nombre(folder routes están los route-handlers):
+ 
+ import { currentUser } from '../middlewares/current-user';
+
+ const router = express.Router();
+
+ router.get('/api/users/currentuser', currentUser,(req, res) => {
+    res.send({ currentUser: req.currentUser || null});
+	});
+
+Prácticamente todo el código que tenía lo puedo sustituir por el middleware,más concretamente por lo que me devuelva(fijate que trato de mantener la misma estructura {currentUser:	payload || null}
+Es posible que queramos abstraer la lógica del middleware má adelante para reusarlo en otros servicios.
+
+		VIDEO 187 REQUIRING AURTH FOR ROUTE ACCESS
+
+En este video crearemos el segundo middleware.Este middleware va a rechazar cualquier petición si el usuario no esta logeado/autenticado.Va a ser bastante simple,si no existe la propiedad req.currentUser responderé con un error	
+Tip:puedo hacer una grabación corta del escritorio con CTRL+SHIFT+ALT+R(de record) <- todas las teclas + r de record.
+
+El código 401 significa 'forbidden'.Pero en vez de lanzar nosotros todo creemos otro error customizado y lo lanzaremos cuando ocurra esta lógica:
+
+
+export class NotAuthorizedError extends CustomError {
+  statusCode = 401;
+
+    constructor() {
+      super("Not authorized");
+      Object.setPrototypeOf(this, NotAuthorizedError.prototype);
+	  }
+
+    serializeErrors() {
+       return [{ message: "Not authorized.Get out of here!" }];
+	  }
+ } <- ahora lanzamos el error si no existe req.currentUser
+
+ -export const requireAuth = (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  )=>{
+    if (!req.currentUser){
+       throw new NotAuthorizedError();
+      }
+    next();
+ };
+
+ De momento lo dejamos como segundo middleware en la ruta current user:
+
+ router.get('/api/users/currentuser', currentUser,requireAuth,(req, res) => {
+
+ Lo pruebo y despues borro la llamada,ya que de momento no lo vamos a necesitar.
+ Nota:en este proyecto un bot podria crear miles de correos,para un proyecto en producción sería necesario enviar un email de confirmación al usuario para que sean dos pasos y no uno.
+
+			 SECCION 10 TESTING ISOLATED MICROSERVICES
+
+		VIDEO 188 SCOPE OF TESTING			 
+
+Stephen me recuerda que había asegurado que hariamos tests automátizados y hasta el momento sólo hemos hecho tests manuales con Postman.Lo primero es entender como se testean los microservicios.
+Hay un amplio espectro de diferentes partes que puedo testear:
+- Puedo testear una única parte de código isolated
+- Puedo testear como varias piezas de código se comportan juntas
+- Puedo testear diferentes componentes trabajando juntos
+- Puedo testear diferentes servicios trabajando juntos.
+
+		VIDEO 189 TESTING GOALS
+
+No vamos a centrarnos demasiado en testear el conjunto,de momento vamos a testear individualmente. 
+
+1- Haremos una petición a la ruta signup y comprobaremos que guarde la data en la base de datos o que devuelva la cookie.
+
+2- El segundo será más unitario.Haremos pruebas sobre nuestro modelo user,de momento es un modelo sencillo pero luego tendré modelos más complicados.
+
+3- Event emitting + receiving: este de momento lo dejaremos para más adelante.
+
+Ejecutaremos los tests directamente en la cli sin usar docker.Esto implica que el host local deberá ser capaz de correr cada servicio.Proyectos más complejos pueden hacer esto complicado.
+
+Para estos tests de momento necesitaremos Node Y MongoDB en local.
+
+		VIDEO 190 ARQUITECTURA NECESARIA PARA LOS TESTS
+
+Primero añadiremos un nuevo script al package.json.Cada vez que ejecutemos 'npm run test' lanzaremos a Jest.Jest es la libreria JS para testeo más usada.Jest realizará las siguientes acciones:
+1- Arrancará una copia en memoria de MongoDB
+2- Arrancará la app web de express
+3-Usará la libreria supertest para mandar peticiones fake a la app express
+4- Ejecutará aserciones para asegurarse que la petición hace lo correcto.
+
+Usar la libreria supertest va a obligarnos a alguna refactorización.Por ejemplo,deberemos tener acceso a la variable 'app' que contiene toda la app.Esto es un problema ya que tenemos mucho código como middlewares e incluso arrancamos la base de datos en el index.ts
+El puerto que hemos hardcodeado también es un problema ya que hay que dejar que supertest eliga uno aleatorio para cuando lanzemos más de un servicio,porque si dejamos el 3000 chocarán.
+
+		VIDEO 191 HACIENDO EL REFACTOR
+
+
+Dejo en el index.ts la definicion de la función start y su llamada y copio todo el set de inicializaciones y middlewares a un nuevo file que llamaremos app.ts:
+
+import express from "express";
+import "express-async-errors";
+import { json } from "body-parser";
+
+import cookieSession from "cookie-session";
+
+import { currentUserRouter } from "./routes/current-user";
+import { signinRouter } from "./routes/signin";
+import { signoutRouter } from "./routes/signout";
+import { signupRouter } from "./routes/signup";
+import { errorHandler } from "./middlewares/error-handler";
+import { NotFoundError } from "./errors/not-found-error";
+
+// Middlewares & Initalizations
+const app = express();
+app.set('trust proxy',true);
+
+app.use(json()); // tambien valía app.use(express.json());
+app.use(
+  cookieSession({
+      signed:false,
+	      secure: true, //solo bajo https
+		    })
+			)
+
+// Endpoints
+app.use(currentUserRouter);
+app.use(signinRouter);
+app.use(signoutRouter);
+app.use(signupRouter);
+
+app.all('*', async (req, res) => {
+  throw new NotFoundError();
+ });
+
+ app.use(errorHandler);
+
+ export default app ;
+
+ También puedo exportar a app asi export { app };
+ Importo la instancia en el index.ts para que no dé error y levanto con skaffold el proyecto.Debería funcionar perfectamente.Pero ahora tengo un archivo que simplemente configura la app y otro que si que la arranca.Usar esta aproximación siempre.
+
+		 VIDEO 192 INSTALLING SUPERTEST AND MONGODB IN-MEMORY
+
+En este video vamos a instalar un par de dependencias.Muy importante,estas dependencias van a ser instaladas en desarrollo únicamente:
+>>npm install --save-dev @types/jest @types/supertest jest ts-jest supertest mongodb-memory-server
+
+ La primera vez puede que la libreria mongodb-memory-server pese un poco(80MB) y por ello tarde un poco.Esto es normal ya que es una copia de mongodb.La razón por la que usar una copia en memoria es que podemos testear múltiples databases a la vez.Recordemos que queremos testear concurrentemente varios servicios en la misma máquina.
+No queremos que se descargue esos 80MB cada vez que cambie la layer del Dockerfile asi que vamos a retocarlo un poco:
+
+RUN npm install --only=prod <- simplemente le añadimos la flag para que no instale nada de Desarrollo
+
+Si veo que skaffold dev no refresca bien debería deshacerme de ts-node-dev y usar nodemon + ts-node.El error es este:
+(small change to src/routes/signup.js. - doesn't update)
+Syncing 1 files for satinflame/auth:edad959f984136c6bc16d4eb9be7e31a89e7fbf89a9aec3ee277b472f51f8cd0
+Watching for changes...
+
+Here's how your package.json for all the services should look like:
+
+  "scripts": {
+     "start": "nodemon ./src/index.ts"
+    },
+  "dependencies": {
+     "nodemon": "^2.0.4",
+     "ts-node": "^8.10.2",
+     "typescript": "^3.9.7"
+    },
+	And remove the ts-node-dev dependecy.
+Parece que no lo necesito de momento
+
+		VIDEO 193 TEST ENVIRONMENT SETUP
+
+Vamos a empezar a conectar todas estas dependencias en nuestro servicio.Lo primero es crear el script para el package.json:
+
+"scripts": {
+    "start": "ts-node-dev --poll src/index.ts",
+    "test":"jest --watchAll --no-cache"
+	   },
+
+La flag --no-cache es porque jest no soporta Typescript.LLegará un momento en que estará realmente confuso.Esta flag 'sólo ayudará un poco'.
+Despues d el script añadiremos otro bloque para configurar al propio jest en el package.json:
+
+  "scripts": { 
+     "start": "ts-node-dev --poll src/index.ts",
+     "test":"jest --watchAll --no-cache"
+   },
+  "jest":{
+      "preset":"ts-jest", 
+      "testEnvironment":"node",
+      "setupFilesAfterEnv":[
+         "./src/test/setup.ts"
+        ]
+  },
+    "keywords": [], ....
+Preset:ts-jest es porque por defecto no tiene soporte para ts asi que se lo añadimos.La tercera propiedad indica que archivo configura los tests asi que vamos a crear esa carpeta 'test' y el archivo de setup	inmediatamente:
+
+import { MongoMemoryServer } from 'mongodb-memory-server';
+import mongoose from 'mongoose';
+import { app } from '../app'; 
+
+beforeAll(async () => { 
+    
+   });
+
+Todo lo que le pase en este Hook 'beforeAll' será ejecutado una única vez antes de los test.Lógicamente es aqui donde vamos a conectar a mongoose con el server de mongodb en memoria:
+
+beforeAll(async () => { 
+   const mongo = new MongoMemoryServer();
+   const mongoUri= await mongo.getUri();
+
+   await mongoose.connect(mongoUri,{
+      useNewUrlParser: true,
+      useUnifiedTopology: true
+	    });
+});
+
+Ahora vamos a usar otro bloque de preconfiguración,pero esta vez este Hook se ejecutará antes de cada test.Fijate que antes de cada test querré limpiar los datos que haya en esa base de datos en memoria.
+
+beforeEach(async () => {
+   const collections = await mongoose.connection.db.collections();
+
+   for (let collection of collections) {
+      await collection.deleteMany({});
+   }
+  });
+
+Fijate,asinto,que despues de ejecutar todos los tests también quiero que se pare ese servidor mongoDB en memoria y que adicionalmente mongoose se desconecte de él.El hook para ello se llama afterAll(()=>{} )
+afterAll(async _ => {
+   await mongo.stop();
+   await mongoose.connection.close();
+});
+Fijate que la variable mongo es de ámbito local asi que dará error.Declaramos mongo con cualquier tipo simplemente:
+
+let mongo: any;
+
+beforeAll(async () => { 
+   mongo = new MongoMemoryServer();
+
+Nota: es buena idea primero desconectar a mongoose y despues cerrar la DB.Hay reportes de errores de MemoryLeak por esto.Cambia el orden
+Nota: puedo usar skaffold run en vez de dev para que no haga el rebuild.Tambíen puedo usar Kaniko.Como si supiera lo que es -_-
+
+			VIDEO 194 EXECUTING OUR FIRST TEST
+
+Vamos a seguir la convención de Jest y crear un directorio llamado '__test__' en el directorio en el que quiera hacer un test(si quiero hacer tests en 'routes' creo el folder '__test__' colgando de routes.Dentro de ese directorio crearé el archivo de pruebas que se llamará igual que el que quiero hacer la prueba pero añadiendo test(empezamos por signup.test.ts,por ejemplo)
+
+Para la primera aserción vamos a mandar un email y passwords válidos y esperar una respuesta con un statusCode de 201:
+
+import request from 'supertest';
+import { app } from '../../app';
+
+
+it('returns a 201 on succesfull signup', async () => {
+    return request(app)
+      .post('/api/users/signup')
+      .send({ 
+          email: 'test@test.com',
+          password: 'password'
+  		      })
+	     .expect(201);
+},timeOut)
+
+Fijate que hemos marcado la función como asíncrona pero no hemos usado ningun await.Esto es sólo un hábito,cuando hagamos múltiples peticiones tendré que usar await,de momento como es sólo una no es necesario.
+Guardamos el archivo y a la altura del proyecto auth ejecutamos 'npm run test'
+auth>>npm run test
+
+Fijate que deberá dar un error porque no existe la variable process.env.JWT_KEY y al separar los archivos ya no controlamos ese error
+Nota:puedo pasar el tiempo como tercer argumento o usar // jest.setTimeout(30000); en cada test(también se puede configurar para el proyecto)
+
+		VIDEO 195 IMPORTANT NOTE
+
+Recordemos que estamos usando la libreria ts-jest para añadir soporte para TS.No se sabe muy bien,pero a veces no va a pasar un test y aunque se arregle la issue seguirá dando fallo.Hay que restartear Jest en ese caso,Stephen no sabe muy bien si es por Jest o por ts-jest
+
+There are also few occasions when restarting Jest does not solve the issue of failing tests.  These can be related to the Jest cache.
+
+To address this, you can add "--clearCache" to the end of the "test" script or create a second test script "test-clear-cache" like so:
+
+"scripts": {
+   "start": "ts-node-dev src/index.ts",
+   "test": "jest --watchAll --no-cache",
+   "test-clear-cache": "jest --watchAll --no-cache --clearCache"
+				  },
+
+Then start Jest with:  "npm start test-clear-cache" <- limpia la cache si hay problemas segun dice este prehistoric.
+
+			VIDEO 196 TESTING INVALID INPUT
+
+Vamos a crear un par de tests más relacionados con el route handler signup.ts.Seguiremos con supertest por su sencillez para crear peticiones.
+Podriamos comprobar la cadena de retorno pero nos vamos a conformar que se nos devuelva un código 400.
+Cada vez que arranque la suite de tests puede tardar de 8 a 10 segundos.Esto es por el mongoDB en memoria.Despues cuando con el ENTER reinicie los tests apenas tardará milisegundos.
+Nota:cuando vaya a usar dos peticiones en un test ya si que tengo que usar await en la primera:
+
+it('returns a 400 with missing email and password', async () => {
+    await request(app)
+     .post('/api/users/signup')
+     .send({ })
+     .expect(400);
+ 
+    await request(app)
+		 .post('/api/users/signup')
+		 .send({ })
+		 .expect(400);
+},6000);
+Tecnicamente la segunda podria llevar un return,cualquier combinación de return ó await vale(los dos es redundante).Asi pues podría cambiar los returns de los tests anteriores por awaits.El efecto es el mismo.
+Hasta ahora va todo bien,pero deberíamos usar lógica más complicada.
+
+			VIDEO 197 REQUIRING UNIQUE EMAILS
+
+Vamos a crear un test con dos requests idénticas.En la primera esperaremos un 201 ya que debería crear un usuario pero en la segunda deberá retornar un 400   
+
+		VIDEO 198 CHANGING NODE ENVS DURING TESTS
+
+Recordemos que el cookie-session middleware va a crear un header en la respuesta.Este header tendrá el nombre de set cookie.Para asegurarnos que todo va bien,miraremos a ver si la respuesta tiene un header llamado set cookie en este video.
+ IMPORTANTE: supertest devuelve la respuesta en las peticiones asi que la puedo almacenar en una constante de la forma habitual:
+
+it('sets a cookie after succesfull singup',async () => {
+    const response = await request(app)
+        .post('/api/users/signup')
+        .send({
+		        email:'test@test.com',
+		        password: 'password'
+			       })
+		    .expect(201);
+// esperamos que la cabecera esté definida(se obtienen con response.get()
+	     expect(response.get('Set-Cookie')).toBeDefined();
+	})
+
+Si ejecutamos el test va a fallar por que securizamos la cookie anteriormente en un middleware:
+
+app.use(
+  cookieSession({
+    signed:false,
+    //secure: true, //solo bajo https
+	secure: process.env.NODE_ENV !== 'test'
+	  })
+)
+
+Lo más razonable es cambiar dinámicamente esta variable según sea un ambiente de test o de producción ya que node proporciona la variable 'process.env.NODE_ENV' la cual es de tipo string y será "test" o "production" y además la maneja el programa.
+
+			VIDEO 199 TESTING SIGNIN FUNCTIONALITY
+
+Vamos a probar el route handler para el signin,asi que creo el archivo en el folder __test__ llamado signin.test.ts.Trataremos de logearnos con un usuario que no existe o con una password incorrecta.En ambos casos deberemos ver una respuesta 400.Finalmente nos logearemos y buscaremos por la cookie en el header.
+
+it('responds with a cookie when given valid credentials', async () => {
+     await request(app)
+       .post('/api/users/signup')
+       .send({ 
+          email: 'test@test.com',
+          password: 'password'
+	   })
+	   .expect(201);
+
+      const response = await request(app)
+	        .post('/api/users/signin')
+	        .send({
+	             email: 'test@test.com',
+	             password: 'password'
+	         })
+	       .expect(200);
+
+	 expect(response.get('Set-Cookie')).toBeDefined();
+})
+
+			VIDEO 200 TESTING SIGN OUT
+
+Vamos a deslogearnos y de momento imprimos la cookie.Puedo ver que me devuelve un array de strings(importante darse cuenta que es un array):
+
+console.log
+[
+express:sess=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; httponly'
+]
+
+Con que esperemos que devuelva esto es suficiente:
+
+expect(response.get('Set-Cookie')[0]).toEqual('express:sess=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; httponly');
+
+		VIDEO 201 TESTING CURRENT USER HANDLER
+
+Creo el archivo current-user.test.ts.Recuerda que habiamos creado la propiedad currentUser en el objeto request.Empecemos simplemente imprimiendo el body de la respuesta:
+
+it('responds with details about the current user', async () => {
+      await request(app)
+        .post('/api/users/signup')
+        .send({
+           email: 'test@test.com',
+           password: 'password'
+         })
+        .expect(201);
+
+       const response = await request(app)
+          .get('/api/users/currentuser')
+          .send()
+          .expect(200);
+
+       console.log(response.body); });
+
+Sin embargo veré que la respuesta no es lo que esperaba:
+
+   console.log
+     { currentUser: null }
+
+   at src/routes/__test__/current-user.test.ts:18:15
+
+Esto es porque Postman y los Navegadores SI van a mandar la cookie de vuelta al Server por defecto,pero ahora mismo estamos con supertest en un ambiente local y supertest no va a mandar la cookie de forma automática,asi que en el GET no viene la cookie y me devuelve un user null,pues es lo que debe hacer si no hay cookie realmente 
+Si bien sabemos que funciona bien,corregir esto está más relacionado con los tests que haremos en un futuro en los siguientes servicios.
+
+		VIDEO 202 EASY AUTH SOLUTION
+
+En este video vamos a ver una forma fácil de mandar esa cookie.En un ambiente de test hay una solución realmente fácil,y es extraer la cookie del paso anterior y fijarla manualmente:
+
+  const authResponse = await request(app)
+     .post('/api/users/signup')
+     .send({
+         email: 'test@test.com',
+         password: 'password'
+      })
+     .expect(201);
+
+ const cookie = authResponse.get('Set-Cookie');         
+
+																	      const response = await request(app)
+        .get('/api/users/currentuser')
+        .set('Cookie',cookie)
+        .send()
+        .expect(200);
+ 
+    console.log(response.body);
+
+La cogemos con get('Set-Cookie') y la establezco con set('Cookie').Parecen objetos predefinidos por el lenguaje.
+Ya podemos realizar cualquier validación contra el body de la response en su propiedad currentUser:
+
+expect(response.body.currentUser.email).toEqual('test@test.com');1
+
+En el siguiente video vamos a refactorizar esto un poco,ya que muchos servicios van a usar autenticación y usaremos este refactor al testearlos
+
+			VIDEO 203 AUTH HELPER FUNCTION
+
+Vamos a crear una función de scope global que registre un usuario y des pues haga alguna petición,de forma que no tengamos que estar todo el rato haciendolo nosotros.Para ello crearemos una propiedad en el objeto prebuilt 'global',visible en cualquier app Node.
+
+declare global {
+  namespace NodeJS {
+     interface Global{
+       signin():Promise<string[]>
+       }
+    }
+}
+Fijate que signin():Promise<TypeReturned> debo decirle el tipo que devuelvo en este caso es un array de strings la cookie que devolvemos:
+
+global.signin = async () => {
+   const email ='test@test.com';
+   const password = ' password';
+
+   const response = await request(app)
+      .post('/api/users/signup')
+      .send({
+         email,password
+       })
+      .expect(201);
+
+   const cookie = response.get('Set-Cookie');
+										        
+   return cookie;
+}
+
+declare global {
+ namespace NodeJS {
+    interface Global {
+     signout(): string;
+	 signin():Promise<string[]>;
+	 signout():integer;
+	}
+ }
+} podria crear y devolver lo que quisiera.Para llamar a este método hay que usar el objeto global,pero lo puedo llamar donde quiera!:
+
+   const cookie = await global.signin(); <- en cualquier test    
+
+Este tipo de propiedades creadas por mí pueden ser del tipo que quiera,aunque tendré que crearlo:
+
+
+declare global {
+  namespace Express {
+    interface Request {
+      currentUser?:UserPayload; <- hay que crearlo
+	 }
+  }
+}   
+
+Fijate como solo ha cambiado el namespace de Express a NodeJS!!Debería conseguir una lista con las interfaces TS y a que namespace pertenecen.
+
+		VIDEO 204 TESTING NON-AUTHED REQUESTS
+
+Vamos a asegurarnos que si no estamos logeados recibimos un currentUser nulo o vacío.
+
+it('responds with null if not authenticated', async () => {
+      const response = await request(app)
+            .get('/api/users/currentuser')
+            .send()
+            .expect(200);
+
+      expect(response.body.currentUser).toEqual(null)            
+})
+
+De momento esto va a ser todo en cuanto a testear nuestro servicio.
+
+
+
+
+

@@ -1,0 +1,423 @@
+			THE DOCKER HANDBOOK 2021 EDITION
+
+El concepto de containerización es bastante antigüo.Pero la emergencia de Docker Engine en 2013 ha hecho más fácil containerizar tus aplicaciones.
+Tan en demanda como pueda estar,empezar puede parecer un poco intimidante al principio.Asi que para este libro,estaremos aprendiendo todo desde las bases hasta un nivel intermedio de containerización.
+Despues de completar el libro entero,serás capaz de:
+-Containerizar casi cualquier aplicación
+-Subir imagenes custom a repositorios online
+-Trabajar con múltiples container usando Docker Compose
+
+Todo el código del proyecto está en https://github.com/fhsinchy/docker-handbook-projects/ .Estará en la rama 'completed'
+
+		INTRODUCTION TO CONTAINERIZARION AND DOCKER
+		
+De acuerdo a IBM:
+  " La containerización involucra encapsular o empaquetar código software y todas sus dependencias de forma que pueda correr uniformemente y consistentemente en cualquier infraestructura.
+
+En otras palabras, la containerización te permite empaquetar tu software junto con todas sus dependencias en un paquete auto-containerizado de forma que pueda correr sin problemas en su proceso de setup.
+
+Consideremos un escenario de la vida real.Asumiendo que has desarrollado una aplicación de gestión de libros increible que puede almacenar información sobre todos los libros que posees,y además puede servir al propósito de un sistema de préstamo de libros para tus amigos.
+
+Si hicieras una lista de dependencias,esta lista sería:
+- Node.js
+- Express.js
+- SQLite3
+
+Bien,teoricamente esto sería todo.Pero en la práctica hay mas cosas.Node.js usa una herramienta de buildeo conocida como node-gyp para construir add-ons nativos.Y de acuerdo con las instrucciones de instalación en su repositorio oficial,esta libreria requiere Python2 o 3 y la apropiada tool-chain para compilar de C/C++
+
+Tomando todo esto en cuenta,la lista final de dependencias sería:
+-Node.js
+-Express.js
+-SQLite3
+-Python2 or 3
+-C/C++ tool-chain
+
+Instalar Python es bastante sencillo independientemente de la plataforma.Setear la herramienta C/C++ es fácil en Linux,pero en Windows y Mac es una tarea dolorosa.
+En Windows, las C++ build tools se miden en GB y toman cierto tiempo para instalarse.Y en un Mac puedes,o bien instalar la aplicación gigantesca Xcode o la mucho más ligera Command Line Tools for Xcode libreria/paquete.
+Independientemente de que opción instales, aún puede deparar en actualizaciones del OS.De echo, el problema es tan común que hay notas de instalación para el macOS Catalina disponibles en el repo oficial.
+hassle=molestia
+Asumiendo que te has tomado la molestia de setear todas las dependencias y has empezado a trabajar en el proyecto.¿significa esto que estas fuera de peligro?or supuesto que no.
+
+Que pasa si tienes un compañero que usa Windows mientras que tu usas Linux.Ahora tendrás que considerar los inconvenientes de como estos dos sistemas operativos manejan las rutas.O el echo de que tecnologías tan populares como nginx no están bien optimizadas para correr en Windows.Algunas tecnologías como Redis ni siquiera vienen pre-fabricadas para Windows.
+
+Incluso si atraviesas toda la fase de desarrollo,que pasa si la persona responsable de manejar los servidores sigue el procedimiento de despliegue incorrecto.
+
+Todas estas pegas podrían solucionarse si simplemente pudieras:
+- Desarrollar y ejecutar la aplicación dentro de un ambiente aislado(conocido como container) que concuerda con tu entorno de despliegue final.
+-Poner tu aplicación dentro de un único archivo(conocido como imagen) jujnto con todas sus dependiencias y las configuraciones necesarias de despliegue.
+- Y compartir esta imagen a trabés de un servidor central(conocido como registro) que es accesible por cualquiera con la autorizacion apropiada.
+
+Tus compañeros serán entonces capaces de descargarse la imagen del registro,ejecutar la aplicación ya que está en un entorno aislado libre de inconsistencias especifícas del sistema operativo o plataforma, o incluso desplegarla directamente en un servidor,dado que la imagen viene con todas las configuraciones apropiadas de producción.
+
+Esta es la idea detrás de la containerización: poner tus aplicaciones dentro de un contenedor aislado,haciendolo portable y reproducible a través de múltiples entornos.
+
+Ahora la cuestión es "Que papel juega Docker aqui?"
+myriad=miríada
+Como he mencionado anteriormente, la containerización es la idea que resuelve una miríada de problemas en el desarrollo de software poniendo 'cosas' en 'cajas'.
+Esta idea tiene algunas implementaciones.Docker es una de ellas.Es una plataforma open-source que permite containerizar aplicaciones,compartirlas usando repositorios públicos o privados y también orquestarlas.
+
+Docker no es la única herramienta de containerización en el mercado,sólo la más popular.Otra Engine de containerización que debo conocer es Podman desarrollada por Red Hat.Otras herramientas como Kaniko de Google o rkt de CoreOS son increibles,pero no están preparadas para reemplazar a Docker aún.
+
+			INSTALAR DOCKER 
+
+Instalar Docker varía bastante según el sistema operativo que esté usando.Pero es universalmente simple(MAC descargar el instalador desde su weby Windows requiere instalar WSL2 adicional al instalador).
+
+En ambos Sistemas el instalador DockerDesktop instalaŕa un grupo de herramientas realmente: Docker Engine(Client+Daemon/Server),Docker Compose, Docker Dashboard(sólo para estos dos),Kubernetes y alguna otra joyita	
+
+En Linux se monta todo manualmente,simplemente instalarlo según version y añadir el usuario actual al grupo docker( sudo chmod -aG docker $USER) o sudo groupadd -a $USER docker)
+
+Sea el sistema que sea procedo a comprobar su instalación imprimiendo sus versiones:
+>docker --version
+>>docker-compose --version
+
+			INTRO TO DOCKER BASICS
+
+Con Docker instalado procedo a ejecutar el primer contenedor
+>docker run hello-world
+Imprimirá un mensaje por consola de una app de consola en C
+Ahora puedo usar docker ps -a para echar un vistazo:
+oscar@acer-linux:~$ docker ps -a
+CONTAINER ID   IMAGE                                 COMMAND                  CREATED          STATUS                      PORTS     NAMES
+1519c9a453c1   hello-world                           "/hello"                 11 seconds ago   Exited (0) 10 seconds ago             priceless_hofstadte
+
+Puedo ver el containerID o el containerName aleatorios y que hizo Exited (0) hace 10 segundos,el (0) indica que no hubo error durante su ejecución.Para entender un poco más de lo ocurrido necesitaría entender estos conceptos:
+
+CONTAINER: en el mundo de la containerización no puede haber algo más fundamental que un container.La doc oficial de Docker dice: 
+'Un container es una abstración en la capa de aplicación(OSI) que empaqueta código y dependencias juntamente.En vez de virtualizar la máquina física entera,los containers virtualizan sólo el SO
+
+Puedo considerar a los containers como la siguiente generación de máquinas virtuales.
+Igual que ellas,los containers son ambientes completamente aislados del sistema anfitrión además de entre cada uno de ellos.También son más ligeros que una VM tradicional
+
+Los containers y las VM son diferentes formas de virtualizar tu hardware físico.Las VM son usualmente creadas y gestionadas por un programa conocido como Hypervisor,como Oracle VM ,VMWare,KVM o MIcrosoft Hyper-V.El hipervisor normalmente se situa entre el SO y las máquinas virtuales,haciendo de comunicador entre ellos.
+
+Cada VM viene con un SO entera que es tan pesado como el SO anfitrión.
+También la cadena de comunicación es más larga(app-So-hyper-SO por cada petición)
+A diferencia de una VM ,un contenedor virtualiza de forma mas inteligente.En vez de usar todo el SO sólo usa el kernel del sistema anfitrión(que en un contenedor docker ese SO siempre es un Linux)
+Como demostración de que SO usa el contenedor puedo usar esto:
+
+oscar@acer-linux:~$ uname -a
+Linux acer-linux 5.8.0-59-generic #66~20.04.1-Ubuntu SMP Thu Jun 17 11:14:10 UTC 2021 x86_64 x86_64 x86_64 GNU/Linux
+
+>docker run alpine uname -a
+Linux 3a1c8844078e 5.8.0-59-generic #66~20.04.1-Ubuntu SMP Thu Jun 17 11:14:10 UTC 2021 x86_64 Linux
+
+Fijate que el contenedor está usando el kernel de mi SO(porque estoy en un Linux!!)Esto es la prueba de que el contenedor usó mi kernel para sus cositas.
+En W10 veré que todos los contenedores usan el kernel WSL2.Esto es porque es ese kernel WSL2 el que hace de hipervisor.En MAC OS es uan VM corriendo HyperKit
+
+DOCKER IMAGE: las imagenes son archivos multi-capa auto-containerizados que actuán como plantilla para crear contenedores.Son como una copia read-only de un contenedor.Las imagenes se intercambian entre registros.
+Actualmente la OpenContainerInitiative(OCI) ha estandarizado el formato de las imagenes,lo que permite que por ejemplo Podman ejecute una imagen que se construyó en Docker.
+Los contenedores son simplemente imagenes en estado RUNNING.Cuando ejecuto un contenedor desde una imagen,estoy creando esencialmente otra capa escribible temporal arriba de la anterior de sólo lectura.
+
+DOCKER REGISTRY: la pieza final es el registro.Un registro es un lugar centralizado donde puedo subir images y también descargarlas de otros usuarios.DockerHub es el registro por defecto,pero también hay otros,como Quay,de Red Hat.
+Se puede compartir cualquier número de imagenes públicas gratis.Las del tutorial se subieron públicamente.
+Aparte del registro público también hay otro privado en la nube,y además también hay otro registro local que corre en tu computadora que cachea las imagenes pulleadas de los registros remotos.
+
+			ARQUITECTURA DOCKER
+
+Es tiempo de entender como se desarrolló Docker como software,ahora que ya tenemos unas bases.
+La máquina consiste de tres major components:
+1.Docker Daemon: el demonio(dockerd) es un proceso que se mantiene en el background y espera por comandos del cliente.El demonio es capaz de manejar varios objetos Docker(también llamado Docker Server)
+2.Docker Client: el cliente(docker) es la interfaz de linea de comandosmayormente responsable de transportar comandos(al demonio)
+3.REST API: la API REST actúa como un puente entre el demonio y el cliente.Cualquier comando escrito en el cliente pasará a través de la API para llegar al demonio
+
+De acuerdo a la doc oficial de Docker:
+'Docker usa una arquitectura cliente-servidor.El docker-client habla con el docker-daemon,el cual hace el trabajo duro de levantar,correr y distribuir contenedores Docker'
+
+En el ejemplo anterior el cliente hizó una petición,pasó por la APi al demonio y este hizo una petición al registro local.como no estaba cacheada la imagen se trasladó la petición al registro remoto,pulleando la imagen.El demonio despues creó el contenedor con ese imagen y además la ejecutó,imprimiendo por consola el texto de esa imagen.
+
+Nota:el comportamento por defecto es pullear de DockerHub si no está en local,pero en cuanto esté cacheada una imagen usará el registro local si no cambió la del remoto en base a su tag.
+
+			CONTAINER MANIPULATION BASICS
+
+Para ejecutar una imagen se usa docker run.La sintaxis es:
+>docker run <image name>
+
+Aunque este comando es perfectamente válido hay una mejor forma de mandar comandos al demonio:
+>docker <object type> <command> <options>
+
+En esta sintaxis:
+- object indica el tipo de objeto Docker que quiero manipular.Este tipo puede ser container | image | network | volume.
+- command indica la tarea a desarrollar por el demonio,en este caso el comando run.
+- options puede ser cualquier parametro válido que pueda sobreescribir el comportamiento(behavior) del comando,como la opción --publish para el mapeo de puertos.
+
+Teniendo esto en cuenta puedo ejecutar cualquier imagen de un registro online en mi sistema local.Veamos con la app Vue.js fhsinchy/hello-dock(corre en el puerto 80 dentro)
+>docker container run --publish 8080:80 fhsinchy/hello-dock (ojo con el orden)
+
+			PUBLICAR UN PUERTO
+
+Los contenedores son ambientes aislados.Tu sistema operativo no sabe nada sobre lo que hay en uno de ellos.Por ello,las aplicaciones en un contenedor están inaccesibles desde afuera de él.
+Para permitir ese acceso,debo de publicar/mapear el puerto apropiado del contenedor con un puerto de mi network local.La sintaxis común es --publish o -p
+> --publish <host port>:<container port>
+
+Al escribir --publish 8080:80 estoy indicando que cualquier petición al puerto 8080 de mi Sistema Operativo será forwardeada al puerto 80 de ese contenedor.
+Asi que puedo acceder a la aplicación desde http://127.0.0.1:8080 ya que seré redireccionado al 80 del contenedor.
+
+Puedo parar el contenedor con CTRL+c cuando quiera:
+
+			USAR EL MODO DETACH
+
+Otra opción que debo memorizar es usar el modo --detach.En el ejemplo anterior,el proceso me coge la linea de comandos.Esto es porque por defecto los contenedores se ejecutan en el foreground y se atan a la terminal como cualquier programa invocado desde terminal
+
+Para sobreescribir este behavior y dejar el contenedor corriendo en segundo plano debo usar la opcion --detach:
+>>docker container run --detach --publish 8080:80 fhsinchy/hello-dock
+
+Esto no atará el contenedor a la terminal más,si no que me devolverá el ID del contenedor nada más.
+
+El orden de las opciones no importa(recuerda que es simplemente una zona).Si que tengo que tener en cuenta que run necesita el nombre de la imagen al final;si pongo algo más a la derecha será pasado como argumento al contenedor(como en docker run alpine uname -a).Por eso da fallo también docker run imagen -port,porque ese comando no lo sabrá ejecutar nininguna imagen
+
+			LISTAR CONTAINERS
+
+Puedo usar docker container ls para listar los contenedores corriendo actualmente:
+oscar@acer-linux:~$ docker container ls
+CONTAINER ID   IMAGE                 COMMAND                  CREATED          STATUS             PORTS                                   NAMES
+ab4efcbd38e6   fhsinchy/hello-dock   "/docker-entrypoint.…"   18 seconds ago   Up 17 seconds      0.0.0.0:8080->80/tcp, :::8080->80/tcp   xenodochial_cray
+09362473ef5c   linuxserver/duckdns   "/init"                  12 days ago      Up About an hour                                           duckdns-linux
+Puedo ver que hay un container con el nombre xenodochial_cray y el ID ab4efcbd38e6.En realidad sólo son los 12 primeros caracteres,el ID son 64 caracteres y lo ví cuando lo ejecuté,pues siempre se devuelve:
+^Coscar@acer-linux:~$ docker container run --detach --publish 8080:80 fhsinchy/hello-dock
+ab4efcbd38e6b9c42cf05dfa7985debe6dbebe7ef4f2e8943a19916f923d3d0e <-ezte
+
+El comando ls sólo lista los contenedores activos.En orden de publicar todos los contenedores que han corrido en el pasado puedo usar la flag --all (-a)
+oscar@acer-linux:~$ docker container ls --all 
+CONTAINER ID   IMAGE                                 COMMAND                  CREATED             STATUS                         PORTS                                   NAMES
+451420056fd1   alpine                                "uname -a"               3 minutes ago       Exited (0) 3 minutes ago                                               romantic_wing
+ab4efcbd38e6   fhsinchy/hello-dock                   "/docker-entrypoint.…"   3 minutes ago       Up 3 minutes                   0.0.0.0:8080->80/tcp, :::8080->80/tcp   xenodochial_cray
+a7c8e6dd27db   fhsinchy/hello-dock                   "/docker-entrypoint.…"   12 minutes ago      Exited (0) 3 minutes ago                                               trusting_hertz
+4f7c0d795dc9   fhsinchy/hello-dock                   "/docker-entrypoint.…"   15 minutes ago      Exited (2) 15 minutes ago                                              optimistic_lovelace
+3a1c8844078e   alpine                                "uname -a"               51 minutes ago      Exited (0) 51 minutes ago                                              zen_hamilton
+1519c9a453c1   hello-world                           "/hello"                 About an hour ago   Exited (0) About an hour ago                                           priceless_hofstadter
+09362473ef5c   linuxserver/duckdns                   "/init"                  12 days ago         Up About an hour                                                       duckdns-linux
+89bf274c5a63   gcr.io/k8s-minikube/kicbase:v0.0.23   "/usr/local/bin/entr…"   2 weeks ago         Exited (130) 4 days ago                      
+Puedo ver como algunos salieron sin problemas con Exited(0) pero otros tienen un (2) o un (130).
+
+			NOMBRAR O RENOMBRAR UN CONTAINER
+			
+Por defecto,cada contenedor tiene dos identificadores:
+- Container ID (un string random de 64 caracteres)
+- NAme- una combinación de 2 palabras aleatorias unidas con un underscore.
+
+Referirse a un contenedor con estos identificadores no es la forma más adecuada.Es mejor dar un nombre a los contenedores.
+Para nombrar un contenedor se usa la flag --name(no tiene version corta):
+>docker container run --detach --publish 8081:80 --name hello-dock-container fhsinchy/hello-dock
+
+Fijate que el puerto 8080 estará ocupado por el contenedor anterior asi que hay que mapear en el exterior en otro puerto libre:
+
+oscar@acer-linux:~$ docker container run -dp 8081:80 --name hello-dock-2 fhsinchy/hello-dock
+64b99cbccdd45160efb03e40498d9304ba307f31c7b92a3bf3ceb45e870940c7
+oscar@acer-linux:~$ docker container ls
+CONTAINER ID   IMAGE                 COMMAND                  CREATED          STATUS             PORTS                                   NAMES
+64b99cbccdd4   fhsinchy/hello-dock   "/docker-entrypoint.…"   11 seconds ago   Up 10 seconds      0.0.0.0:8081->80/tcp, :::8081->80/tcp   hello-dock-2
+ab4efcbd38e6   fhsinchy/hello-dock   "/docker-entrypoint.…"   9 minutes ago    Up 9 minutes       0.0.0.0:8080->80/tcp, :::8080->80/tcp   xenodochial_cray
+09362473ef5c   linuxserver/duckdns   "/init"                  12 days ago      Up About an hour                                           duckdns-linux
+
+Incluso puedo renombrar un contenedor activo con el comando rename.La sintaxis es:
+>docker container rename <container name> <new name>
+
+oscar@acer-linux:~$ docker rename hello-dock-2 hello-dock-3
+oscar@acer-linux:~$ docker ps
+CONTAINER ID   IMAGE                 COMMAND                  CREATED              STATUS              PORTS                                   NAMES
+64b99cbccdd4   fhsinchy/hello-dock   "/docker-entrypoint.…"   About a minute ago   Up About a minute   0.0.0.0:8081->80/tcp, :::8081->80/tcp   hello-dock-3
+El comando no devuelve nada,tendré que listar los contenedores activos para ver el cambio.Fijate que rename voy a necesitar en mi day-tools.
+
+			PARAR O MATAR UN CONTENEDOR ACTIVO
+
+Los contenedores corriendo en el frente pueden pararse simplemente cerrando la terminal o con crtl + c.Los contenedores corriendo en el background,sin embargo,no pueden pararse de la misma forma.
+
+Hay dos comandos que pueden realizar esta tarea.Uno es 'container stop' y el otro es container kill.La sintaxis es:
+>>docker container stop <container identifier>
+Puedo obtener los identificadores de un contenedor con docker container ls:
+>>docker container ls
+oscar@acer-linux:~$ docker container ls
+CONTAINER ID   IMAGE                 COMMAND                  CREATED       STATUS       PORTS                                   NAMES
+64b99cbccdd4   fhsinchy/hello-dock   "/docker-entrypoint.…"   5 hours ago   Up 5 hours   0.0.0.0:8081->80/tcp, :::8081->80/tcp   hello-dock-3
+ab4efcbd38e6   fhsinchy/hello-dock   "/docker-entrypoint.…"   5 hours ago   Up 5 hours   0.0.0.0:8080->80/tcp, :::8080->80/tcp   xenodochial_cray
+09362473ef5c   linuxserver/duckdns   "/init"                  12 days ago   Up 6 hours                                           duckdns-linux
+
+>>docker container stop hello-dock-3 
+
+Nota:el comando stop desconecta un contenedor grácilmente(gracefully) mandando una señal SIGTERM.Si el contenedor no se para within a certain period, a SIGKILL signal is sent.Esta señal SIGKILL desconecta el container inmediatamente.
+En caso que quiera mandar una señal SIGKILL en vez de una SIGTERM(de TERMINATE) puedo usar el comando container kill.La sintaxis es la misma:
+>>docker container kill xenodochial_cray 
+
+			RESTARTEAR UN CONTAINER
+
+Cuando se trata de reiniciar un contenedor hay dos escenarios posibles:
+1-Reiniciar un contenedor que ha sido parado o matado previamente
+2-Rebootear un contenedor activo.
+
+Como ya sé,los contenedores parados permanecen en mis sistema.Si quiero puedo reiniciar uno de ellos.El comando container start puede ser ousado para iniciar cualquier contenedor stopped o killed.La sintaxis es :
+>>docker container start <container identifier>
+
+Para obtener una lista de todos los contenedores esta vez tendré que ejecutar el comando container ls --all pues necesito ver los parados.Entonces podré ver los containers con status de Exited.
+oscar@acer-linux:~$ docker container ls --all 
+CONTAINER ID   IMAGE                                 COMMAND                  CREATED       STATUS                     PORTS     NAMES
+64b99cbccdd4   fhsinchy/hello-dock                   "/docker-entrypoint.…"   5 hours ago   Exited (0) 7 minutes ago             hello-dock-3
+451420056fd1   alpine                                "uname -a"               5 hours ago   Exited (0) 5 hours ago               romantic_wing
+ab4efcbd38e6   fhsinchy/hello-dock                   "/docker-entrypoint.…"   5 hours ago   Exited (0) 7 minutes ago             xenodochial_cray
+a7c8e6dd27db   fhsinchy/hello-dock                   "/docker-entrypoint.…"   5 hours ago   Exited (0) 5 hours ago               trusting_hertz
+4f7c0d795dc9   fhsinchy/hello-dock                   "/docker-entrypoint.…"   5 hours ago   Exited (2) 5 hours ago               optimistic_lovelace
+3a1c8844078e   alpine                                "uname -a"               6 hours ago   Exited (0) 6 hours ago               zen_hamilton
+1519c9a453c1   hello-world                           "/hello"                 6 hours ago   Exited (0) 6 hours ago               priceless_hofstadter
+Ahora puedo arrancar cualquiera de nuevo:
+>>docker container start hello-dock 
+El comando 'container start' inicia cualquier contenedor directamente en modo detach y con cualquier configuración existente de mapeo de puertos.Asi si el contenedor salía al puerto 8081 del anfitrión seguirá saliendo por ese puerto.
+
+Ahora bien,puede haber escenarios en los que quiera rebootear un contenedor activo,para esto tengo el comando 'docker container restart'.La sintaxis es la misma que 'start':
+>docker container restart hello-dock-3
+
+La única diferencia es que el comando restart intenta parar el contenedor y despues lo reinicia mientras que start únicamente puede arrancarlo.Si el contenedor está parado ambos comandos lo arrrancan,pero si está activo el comando start no es factible,sólo el comando restart lo reinicia.
+oscar@acer-linux:~$ docker container start hello-dock-3 
+hello-dock-3
+oscar@acer-linux:~$ docker container ls
+CONTAINER ID   IMAGE                 COMMAND                  CREATED       STATUS          PORTS                                   NAMES
+64b99cbccdd4   fhsinchy/hello-dock   "/docker-entrypoint.…"   5 hours ago   Up 17 seconds   0.0.0.0:8081->80/tcp, :::8081->80/tcp   hello-dock-3
+09362473ef5c   linuxserver/duckdns   "/init"                  12 days ago   Up 6 hours    
+Si me fijo start no lo arranca de nuevo,aunque no da error ejecutar el comando sobre un container activo,pero restart si resetea el tiempo:
+oscar@acer-linux:~$ docker container restart hello-dock-3 
+^[[Ahello-dock-3
+oscar@acer-linux:~$ docker container ls
+CONTAINER ID   IMAGE                 COMMAND                  CREATED       STATUS        PORTS                                   NAMES
+64b99cbccdd4   fhsinchy/hello-dock   "/docker-entrypoint.…"   5 hours ago   Up 1 second   0.0.0.0:8081->80/tcp, :::8081->80/tcp   hello-dock-3
+09362473ef5c   linuxserver/duckdns   "/init"                  12 days ago   Up 6 hours                                            duckdns-linux
+
+			CREAR UN CONTENEDOR SIN EL COMANDO RUN
+
+Hasta ahora he visto el comando run,el cual en realidad es una combinación de dos comandos independientes.Estos comandos son:
+>>container create : este comando crea un contenedor desde una imagen.Sin embargo no arranca el contenedor aún
+>>container start: este comando arranca un contenedor que ha sido previamente creado.
+
+Esto introduce un nuevo status,el de Created:
+>>docker create -p 8082:80 fhsinchy/hello-dock
+
+oscar@acer-linux:~$ docker container ls --all
+CONTAINER ID   IMAGE                                 COMMAND                  CREATED          STATUS                      PORTS                                   NAMES
+eb3a4b29abdb   fhsinchy/hello-dock                   "/docker-entrypoint.…"   20 seconds ago   Created                           
+
+
+Fijate que no puedo pasarle --detach al contenedor en su creación.Además,para listarlo necesitaré --all pues no está activo aún.
+Una vez tenga un contenedor en status de Created puedo arrancarlo con start o restart,pues ambos valian para arrancar un contenedor parado:
+
+oscar@acer-linux:~$ docker container restart charming_hofstadter 
+charming_hofstadter
+oscar@acer-linux:~$ docker ps
+CONTAINER ID   IMAGE                 COMMAND                  CREATED         STATUS          PORTS                                   NAMES
+eb3a4b29abdb   fhsinchy/hello-dock   "/docker-entrypoint.…"   9 minutes ago   Up 4 seconds    0.0.0.0:8082->80/tcp, :::8082->80/tcp   charming_hofstadter
+
+Puedo ver que el mapeo de puertos lo ha mantenido y recuerda que arrancar un contenedor parado lo hace en modo detach por defecto.
+
+		REMOVE DANGLING(colgantes) CONTAINERS
+
+Como ya he visto,los contenedores parados o matados permanecen en el sistema.Estos contenedores colgantes pueden tomar espacio o crear conflictos con nuevos containers.
+Para remover un contenedor parado puedo usar el comando container rm.La sintaxis es:
+>>docker container rm <container identifier>
+Para encontrar contenedores no activos debo usar ls --all y buscar contianers con status Exited:
+>>docker rm optimistic_lovelace 
+
+Puedo pasar varios separandolos por un espacio.También podría usar el comando prune(no recomendable pues va a eliminar cualquier contenedor parado)
+También se le pueden pasar las flags --rm a run y start:
+>>docker container run --rm --detach --publish 8888:80 --name hello-dock fhsinchy/hello-dock
+
+Si ahora lo parara no pertenecerá en el sistema,se borrará también:
+>docker stop hello-dock
+Fijate que esto puede que no siempre sea lo que quiera.
+
+			RUN CONTAINERS EN MODO INTERACTIVO
+
+Nota: echo -n( not output the trailing newline)
+HASTA AHORA SOLO HEMOS CORRIDO CONTENEDORES CON DOS IMAGENES.ESTAS IMAGENES ESTAN HECHAS DE SIMPLES PROGRAMAS QUE NO SON INTERACTIVOS.
+
+DISTRIBUCIONES COMO UBUNTU,FEDORA O DEBIAN TIENEN IMAGENES OFICIALES.LENGUAJES DE PROGRAMACION COMO PYTHON,PHP O ENTORNOS RUN-TIME COMO NODE O DENO TIENEN TAMBIÉN SUS IMAGENES OFICIALES.
+
+ESTAS IMAGENES NO SOLO EJECUTAN ALGUN PROGRAMA PRE-CONFIGURADO.ESTAN CONFIGURADAS  PARA EJECUTAR UNA SHELL POR DEFECTo.SOLO HEMOS CORRIDO CONTENEDORES CON DOS IMAGENES.ESTAS IMAGENES ESTAN HECHAS DE SIMPLES PROGRAMAS QUE NO SON INTERACTIVOS.
+
+Esta shell suele ser una 'sh' o una 'bash'.En caso de runtimes como node suele ser su shell por defecto.
+Com ya habrás aprendido las shells son programas interactivos.Una imagen configurada para correr tal shell es en sí una imagen intercactiva.Requieren una opción especial -it que hay que pasarle al comando docker run
+Como un ejemplo,si ejecutas un container usando la imagen ubuntu con el comando 'docker run ubuntu' veré que no sucede nada.Pero si ejecuto el comando con la opción -it,aterrizaré directamente en la bash del container Ubuntu.
+>>docker container run --rm -it ubuntu
+oscar@acer-linux:~$ docker run -ti ubuntu
+root@b54ef66ce002:/# cat /etc/os-release 
+NAME="Ubuntu"
+VERSION="20.04.2 LTS (Focal Fossa)"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="Ubuntu 20.04.2 LTS"
+VERSION_ID="20.04"
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+
+La opcion -it prepara el escenario para que puedas interactuar con cualquier programa interactivo dentro de un contenedor.Esta opcion actualmente tiene dos opciones independientes unidas:
+1- La opcion -i o --interactive me conecta al input stream o flujo de entrada del contenedor,de forma que puedo mandar entradas a la bah.
+2-La opción -t o --tty se asegura que yo tenga buen formatting y una terminal nativa alojando una pseudo--tty
+
+Necesitaré usar la opción -it cada vez que quiera ejecutar un contenedor en modo interactivo.Otro ejemplo puede ser ejecutar la imagen node de esta forma:
+
+>>docker container run -it node:
+
+Cualquier código Javascript válido podrá ser ejecutado en esta terminal,pues fijate que lo que hago es abrir un interprete Node:
+
+Fijate que podré abrir cualquier interprete con Docker!im-prezionante asinto...
+
+		COMO EJECUTAR COMANDOS DENTRO DE UN CONTENEDOR
+
+En la seccion anterior hemos ejecutado el comando siguiente:
+>>docker run alpine uname -a
+
+En este comando he ejecutado el comando uname -a dentro de un Alpine Linux container.Escenarios como éste,donde lo único que quiero es ejecutar un comando son muy comunes.
+
+Imagina que quieres encodificar un string con el programa base64 de Linux.Estará disponible en casi cualquier distribución Linux o Unix,pero no en Windows.
+En esta situación puedo simplemente ejecutar un contenedor usando imagenes como busybox y dejar que haga ella el trabajo.La sintaxis genérica para encodificar un string usando base64 sería:
+>>echo -n my-secret | base64
+
+Para ejecutar la encodificación usando la imagen busybox,puedo ejecutar el siguiente comando:
+>>docker container run --rm busybox echo -n my-secret | base64
+
+Recuerda que todo lo que pase a la derecha del contenedor será pasado como argumento al entrypoint que tenga el contenedor asignado.
+>>docker container run --rm busybox echo -n my-secret | base64
+
+Un entrypoint es como una puerta de entrada a la imagen.La mayoria de las imagenes excepto las ejecutables usan shell o sh como la puerta de entrada o gateway por default.Asi que cualquier comando shell válido puede ser pasado como argumento.
+
+		COMO TRABAJAR CON IMAGENES EJECUTABLES
+
+En la sección anterior hemos mencionado brevemente las imagenes ejecutables.Estas imagenes están designadas para comportarse como programas ejecutables.
+Veamos por ejemplo el proyecto rmbyext(remove by extension).Es un simple script Python capaz de borrar recursivamente archivos en base a las extensiones pasadas por argumento.
+Si tengo Git y Python puedo instalarlo con pip:
+>>pip install git+https://github.com/fhsinchy/rmbyext.git#egg=rmbyext
+Fijate como con pip se puede instalar desde GitHub,que prehistorics.
+
+El script debería ser visible desde cualquier parte del sistema ahora.La sintaxis genérica sería ahora:
+>>rmbyext <file extension>
+
+oscar@acer-linux:~/Escritorio/DataStore$ touch file.paco
+oscar@acer-linux:~/Escritorio/DataStore$ touch file2.paco
+oscar@acer-linux:~/Escritorio/DataStore$ ls -a
+.  ..  file2.paco  file.paco  mobydick.txt  preciosChicago.csv
+oscar@acer-linux:~/Escritorio/DataStore$ rmbyext paco
+Removing: PACO
+file2.paco
+file.paco
+Puedo ver que el programa hace algo,claro que podia hacer lo mismo sin tener que usar Python.
+
+Bien,una imagen ejecutable de este programa debería ser capaz de tomar las extensiones como argumentos y borrarlas tal como acabo de hacer.
+La imagen fhsinchy/rmbyext se comportará de forma similar.Contiene una copia y está configurada para ejecutar el script en en directorio /zone del container.
+Ahora el problema es que los contenedores están aislados del sistema local,asi que el programa no puede acceder al sistema de ficheros desde el contenedor.Si de alguna forma pudiera mapear el directorio de mi sistema de ficheros al directorio /zone del container estos ficheros serían alcanzables por el script.
+
+Una manera de garantizar acceso directo a mi local FS es con bind mounts.
+Un bind mount me permite formar un data binding en ambas direcciones entre un directorio del  FS local y otro directorio en el contenedor.Fijate que el enlace va en las dos direcciones por defecto.
+
+>>docker container run --rm -v $(pwd):/zone fhsinchy/rmbyext pdf <- recuerda que le puedo pasar ya argumentos
+
+Como ya he adivinado,la flag -v $(pwd):/zone o --volume se usa para crear un punto de montaje en el contenedor.Esta opción puede usar tres campos separados por ':':
+>--volume <localFSABSOLUTEPATH>:<CONTAINERABSOLUTEPATH>:<read write access>
+
+El tercer campo es opcional pero debo pasar los paths absolutos de mi file system y del file system del contenedor.
+
+Sustitución de comandos en bash:la sustitución de comandos permite reemplazar la salida de un comando por el propio comando.Esta sustitución sólo ocurre cuando el comando está englobado entre $(command) o `command`.Bash ejecutará el comando en una subshell y lo traerá de vuelta sin trailing newspaces(echo -n).Este tipo de sustituciones pueden ser incluso anidadas.Fijate que por consistencia con W10 en realidad debería usar $PWD 
+
+La opcion --volume o -v es válida tanto para container run como para container create.
+La diferencia entre una imagen regular y una ejecutable es que el entry-point para una ejecutable no será una sh | bash.En este caso es el script python el que está en el gateway y recibirá el argumento y se ejecutará.Recuerda que cualquier cosa que escriba después de el nombre de una imagen es pasado al entry-point de la imagen como arg.
+
+Aunque las imagenes ejecutables no són muy comunes pueden ser muy útiles.
+
+		DOCKER IMAGES MANIPULATION BASICS
+
+
+

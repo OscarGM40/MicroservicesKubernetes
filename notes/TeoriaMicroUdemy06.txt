@@ -1,0 +1,817 @@
+					SECTION 14  IMPLEMENTING NATS EVENT-BUS 
+
+Ahora podriamos ir por 3 caminos.
+1- El primero sería crear el frontend para los tickets,que el usuario pueda verlos,ceralos,etc en una UI
+
+2- crear el servicio 'orders' (recuerda que el servicio orders va a tener toda la información sobre creación y edición de ordenes de compra de tickets.Será algo muy parecido al backend que acabo de hacer para los tickets
+
+3- Añadir un bus de eventos y conectarle el servicio Tickets.Iremos por la opción 3 ya que comprender el event bus y las limitaciones que vamos a encontrar me van a enseñar como trabajan el Ticket service y el Order service.
+
+				VIDEO 281 THREE IMPORTANT ITEMS
+
+La doc está en : https://docs.nats.io/
+Este NATS Streaming Server me permitirá compartir eventos entre todos los servicios de la app
+
+IMPORTANTE: es extremadamente importante que entienda que NATS y NATS Streaming Server son dos programas diferentes.NATS es una implementación básica.NATS Streaming Server es una implementación sobre NATS(esta buildeada sobre NATS).Es más avanzada y tiene más funcionalidad que usaremos.
+Por todo esto cuando lo instale tengo que asegurarme que estoy haciendo aiming al Streaming Server
+
+2- Usar NATS Streaming Server afectará terriblemente a como compartir data y a decisiones que afectarán a mi app.
+
+3- vamos a correr la imagen oficial de docker 'nats-streaming' en nuestro cluster kubernetes.Veamos la doc de esta imagen:
+* De nuevo ten cuidado que hay imagen para nats y para nats streaming server.
+La doc está abajo,sobre todo queremos ver los comandos cli.
+
+				VIDEO 282 CREATING A DEPLOY+SRV FOR NATS
+
+Como cualquier deploy voy al folder infra/k8s y creo el file nats-depl.yaml:
+* siempre que cree un contenedor puedo pasarle comandos adicionales en Docker,esto se hace en un arreglo en spec.template.spec.containers.args[](en la propiedad args: [] :
+Por ejemplo ["--store","ruta"] para usar un store(-st es la flag corta)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats-depl
+spec: 
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels: 
+        app: nats
+    spec: 
+      containers: 
+        - name: nats
+          image: nats-streaming:0.17.0
+          args: [
+"-p","4222",'-m','8222','-hbi','5s','-hbt','5s','-hbf','2','-SD','-cid','ticketing'
+
+-----            -------------
+-cid : cluster ID <string>
+-hbi : hearbeat interval => intervalo en el cual el server mando los hearbeat al cliente
+-hbt: hearbeat timeout => cuanto espera el server por una respuesta hearbeat
+-hbf: hearbeat fail_count: numero de hearbeats failed antes de que el server cierre la conexion con el cliente
+-SD: stan_debug: enable STAN debugging output <-
+-p : port for clients(default: 4222)
+-m: http_port: used port for http monitoring
+Todo esto está en la documentación.
+]
+IMPORTANT: logicamente hay que crearle un servicio para verle:
+
+--- <- para separar 
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-srv
+spec:
+  selector:
+    app: nats
+  ports: 
+    - name: client
+      protocol: TCP
+      port: 4222
+      targetPort: 4222
+    - name: monitoring
+      protocol: TCP
+      port: 8222
+      targetPort: 8222
+
+Deberia ver el pod con un k get p
+
+				VIDEO 283 BIG NOTES ABOUT NATS STREAMING
+
+Este servidor se comporta de manera muy diferente a como lo hacia el primer servidor de eventos casero que hicimos.
+Recuerda que lanzabamos eventos con axios y el bus-event era una simple server express app que los recibia y los lanzaba de vuelta
+Básicamente hicimos todo con axios y express.Ahora no será asi.
+
+DIFFERENCE NUMBER ONE
+Para comunicarnos con NATS usaré una librería en el cliente llamada node-nats-streaming(npm i node-nats-streaming)
+Puedo ir a su documentación: https://www.npmjs.com/package/node-nats-streaming
+Sin embargo es un tanto complejo entender este Server,asi que haremos un proyecto standalone para entenderlo sin mezclar K8s ni Docker.
+
+La libreria trabaja sobre una arquitectura de EventEmitter(como Socket.io).Asi que sólo tengo que ocuparme del frontend al usar NATS
+
+DIFFERENCE NUMBER TWO
+Nuestro custom Event Bus mandaba eventos a cada servicio,sin filtrar.Esto no es muy eficiente.Ahora,con NATS, se nos pedirá que nos subscribamos a un canal especifico.Asi que cuando emitamos un evento hay que decirle el canal también.Y cuando escuchemos por eventos también diremos a que canal/es vamos a subscribirnos(evento:canal).
+
+DIFERENCIA NUMERO TRES
+Nuestro Event Bus guardaba los eventos en memoria.Habiamos creado un array que los almacenaba y si un servicio caia al reiniciarse podia pedir que eventos se ha perdido
+NATS Streaming guarda por defecto en memoria los eventos,pero puede customizarse para que sea en archivos o en una DB MySQL/Postgres( y Mongo no admite ??)
+
+				VIDEO 284 BUILDING THE STANDALONE NATS PROJECT	
+
+Vamos a crear un subproyecto para aprender a usar NATS SS.Asi que creo esa carpeta desde el root del proyecto y empiezo un proyecto node:
+
+>mkdir nats-test && cd nats-test
+nats-test>npm init -y
+* Como vamos a usar typescript vamos a necesitar algunas dependencias:
+>npm i node-nats-streaming ts-node-dev  typescript @types/node
+
+Una vez instale todo creo el directorio 'src' y dentro de él dos archivos, publisher.ts y listener.ts
+Como su nombre indica el listener va a escuchar por eventos y el publisher los emitirá/publicará
+También creo el tsconfig.json:
+>tsc --init <- requerirá tener typescript instalado globalmente
+
+Antes de empezar con código cambio los npm scripts:
+
+scrips:{
+  "publish:"tsc-node-dev --notify false src/publisher.ts",
+  "listen":"tsc-node-dev --notify false src/listener.ts"
+* Simplemente apunto a los dos archivos.
+
+Importo la libreria 'node-nats-streaming' para crear un cliente:
+import nats from 'node-nats-streaming';
+
+* La convención manda llamar stan(nats al revés) al cliente.Debo conectarme al servidor con el método nats.connect(clusterId,clientId,options):
+const stan = nats.connect('ticketing','abc',{
+  url:'http://localhost:4222' }); <- fijate que no tengo un server ahi
+
+* Igual que un socket,emitirá el evento 'connect' que es parte de la libreria al conectarse:
+stan.on('connect', () => {
+  console.log('conectado');
+});
+* Puedo ver que hasta ahora es todo sencillo,sin embargo fijate que no tengo un servidor NATS en el puerto 4222 sino que lo tengo en el cluster,como un Service!
+
+NOTA: si tengo problemas con typescript puedo decirle que ignore una linea con // @ts-ignore!
+stan.on('connect'... <- puedo ignorar.Recuerda // @ts-ignore
+
+			VIDEO 285 PORT-FORWARDING WITH KUBECTL
+
+Para acceder a algo dentro de un cluster hay un par de opciones.
+
+1- Acceder mediante el objeto Ingress: Recuerda que hemos creado un POd mediante el Deploy y un ClusterIP Service.Podría acceder fácilmente mediante el Ingress-Nginx
+Sin embargo es una opción un tanto agresiva en caso de roturas de conexion.
+
+2- Crear un NodePort: con un NodePort Service abriré al mundo lo que haya en ese Pod.Nos obligaría a escribir un config.yaml,obviamente.
+* Para  algo tan simple como esta app de testeo es mucho trabajo.
+
+3- Port-Forwarding: podemos portforwardear un puerto hacia el pod,comportandose como un NOdePort,básicamente.Es la opción que elegiremos.
+
+* Para crear este port-forwarding primero hay que ver el nombre del pod
+> kubectl get pods 
+ing$ k get pods
+NAME                                 READY   STATUS    RESTARTS   AGE
+auth-depl-6fd94577ff-p9lnc           1/1     Running   0          44m
+auth-mongo-depl-6495dc689-rnkb5      1/1     Running   0          44m
+client-depl-69cc596868-xtxvq         1/1     Running   0          44m
+nats-depl-78cf88bf79-hf4f4           1/1     Running   0          44m    <- Éste!!
+tickets-depl-78d9984898-dqzd2        1/1     Running   0          44m
+tickets-mongo-depl-97d4c6589-2mlms   1/1     Running   0          44m
+
+ * Me quedo con el nombre del pod y lo expongo
+>kubectl port-forward nats-depl-78cf88bf79 4222:4222
+El primer 4222 es el del host,el segundo el que expongo del pod(ya sé que sale por el 4222)
+Enm cuanto haga esto dejaré la terminal bloqueada con ese port-forwarding:
+
+Forwarding from 127.0.0.1:4222 -> 4222
+Forwarding from [::1]:4222 -> 4222
+
+Ya puedo conectarme a localhost:4222 que me atenderá ese pod.
+
+				VIDEO 286 PUBLISHING EVENTS
+
+Recuerda que al usar NATS siempre tengo que publicar hacia un canal/tópico en concreto.Le llamaremos Subject a partir de ahora.El Object es elcontenido y el Subject el canal al que va o del que oigo.
+Se recomienda crear un Subject descriptivo como 'ticket:created'.
+Asi que vamos a publicar algo,ya que realmente no es necesario que nadie escuche para publicar.
+
+El listener va un poco diferente.Se subscribirá a un canal y recibirá la data en algo llamado 'subscription' cada vez que el server NATS le dé la gana de mandar algo.
+
+Hay un pequeño downside que hay que entender y es que sólo se pueden mandar cadenas de texto,y nosotros queremos mandar un Object.Asi pues habrá que mandarlo como JSON(ya que JSON es un plain string)
+Fijate como no sabía que JSON es una simple cadena de texto,pero de ahi que sea tan usado e importante(mira que es asinto el jason este)
+
+Sea como fuere para publicar se usa el método stan.publish(subject,data,cb) donde la callback es opcional y los dos primeros son strings:
+
+stan.on('connect',()=>{
+	
+	const data = { price:20,title:'concert',id:'123'}
+	stan.publish('ticket:created',JSON.stringify(data),()=>{
+      console.log('publicado')
+  }
+
+} //fin connect
+
+De nuevo a la data que se manda se le suele referir como message.
+
+					VIDEO 288 LISTENING FOR DATA
+
+In the upcoming lecture, I will show typing rs in my terminal to restart the ts-node-dev instance.  The ts-node-dev library recently released a change that disables this restart behavior by default.  To enable it, you need to update the two scripts we added to the package.json file.  Update the two scripts to the following:
+
+"scripts": {
+  "publish": "ts-node-dev --rs --notify false src/publisher.ts",
+  "listen": "ts-node-dev --rs --notify false src/listener.ts"
+},
+Just add in the --rs to each command.
+
+Para crear el listener de nuevo levanto un cliente de la misma forma(claro que el ClientId debe ser otro):
+import nats from 'node-nats-streaming';
+
+cons stan = nats.connect(clusterId,otherClientId, () => {
+  url : 'http:localhost:4222' 
+})
+
+stan.on('connect', () => {
+
+  console.log('Listener connected to NATS')
+
+Fijate que sale mucha morralla por pantalla.Puedo hacer un console.clear() para eliminar las lineas de información
+
+No sólo esto,sino que puedo usar el comando 'rs' en la terminal para restartear la aplicación(es sólo de typescript¿?Probar en Angular y React)
+Bien,como listener que somos me tengo que susbscribir a un canal,a algo,para ello esta el método subscribe(subject):
+
+const subscription = stan.subscribe('ticket:created');
+
+A diferencia de otras librerias,no se trabaja con callbacks,y además aún me falta decir a que eventos o mensajes me voy a subscribir de ese canal(pues simplemente me he suscrito a todo el canal):
+
+subscription.on('message', (msg) => {
+  console.log('Message received');
+})
+* Voy a la terminal del publisher y en el mismo momento que publique un mensaje a ese canal el listener tendría que imprimir ese console.log
+
+			VIDEO 289 ACCESING EVENT DATA
+
+Recordemos que el 'msg' que recibimos lo hemos catalogado como 'any'.En realidad es de tipo Message y ya está una clase definida para ello en esta libreria 'node-nats-streaming'.
+Asi que importo la clase y le especifico el tipo en la callback:
+
+import nats, { Message } from 'node-nats-streaming';
+
+cons subscription = stan.subscribe('ticket:created')
+subscription.on('message', (msg:Message) => { 
+  
+})
+* Puedo hacer CTRL+click para ver esa clase Message.Veré métodos como getSubject():string,getSequence():Number,getData():String|Buffer
+Algunos métodos como getSequence(es el numero del evento,empieza desde 1) o getData son vitales ya que debo acceder a la data
+console.log(`Received ${msg.getSequence() message`)
+console.log(JSON.parse(msg.getData() as string);
+
+			VIDEO 290 RANDOM CLIENT ID GENERATION
+
+El comando para el pf era 
+>$ k port-forward nats-depl-78cf88bf79-hf4f4  4222:4222
+
+En este punto tengo un publisher y un listener,pero imagina que el servicio Orders está recibiendo mucho tráfico.Puedo,o bien escalar verticalmente(más RAM,más CPUs,mas HDD,lo cual tiene como downsides que no es algo temporal) o también podríamos tratar de escalar horizontalmente creando una segunda instancia del servicio Orders(esto es kubernetes en sí,escalado horizontal)
+Bien,está claro que ambos servicios Order tienen que conectarse a nuestro NATS Streaming Server.Tal como lo tenemos ahora dará un error "ClientID already registered)
+* Asi pues,cuando vaya a correr múltiples copias de un publisher o un listener(en definitiva clientes replicados) necesitaré que ese Id sea diferente y atómico.
+Para generar un string randomly puedo usar la funcion ramdomBytes del módulo core crypto(randomBytes simplemente creará letras y números al azar):
+
+import { randomBytes } from 'crypto';
+
+const stan = nats.connect('ticketing',randomBytes(4).toString('hex')
+* Porque lo pasó a hexadecimal¿?Sea como fuere siempre se le pasa a hexadecimal el resultado de randomBytes.
+
+En realidad esto es sólo el primer paso para poder tener múltiples listeners.
+
+				VIDEO 291 QUEUE GROUPS
+
+Necesitamos agrupar cada replica en un grupo para que el publisher sólo mande el evento a una replica por grupo(fijate que en cuanto haya replicas implica que deban agruparse)
+Recordando la app anterior,montamos el QueryService sólo para que un único servicio pueda postear,actualizar etc..
+Imagina que pasaria si dos servicios intentan crear a la vez un post,o agregar un comentario al mismo post.
+Lo que va a ocurrir es que se duplicará el comentario,agregando dos iguales(imagina con 400 servicios el problema).
+
+Asi pues,para prevenir esto ,están los Queue Groups.Esto es algo que tenemos que crear nosotros por cada canal/tópico.
+Cada cliente listener ahora además de unirse a una sala,también tiene que unirse a esa cola.
+El server NATS ahora,cada vez que alguién publique algo en ese canal seleccionará aleatoriamente uno de los listener y le mandará el evento(Object)
+
+Es importante entender que no hay porque unirse a una cola,esto es para los servicios que estén duplicados,para que no se pisen.Puede haber perfectamente en un canal dos Order Service y un Subscribe Service y este Subscribe,al ser uno solo no necesita crear un Queue group
+
+Afortunadamente,unirse a una cola/grupo es muy fácil en un listener.Simplemente se le pasa un string como segundo argumento del subscribe y éste listener se unirá a ese grupo(y si no existiera el grupo se creará):
+
+const subscription = stan.subscribe('ticket:created','listenerQueueGroup') <- éste listener va para ese grupo,en cuanto haya varios listeners se balanceará la recepción de mensajes.
+
+* Si ahora hago un rs en el publisher sólo irá a uno el Object!
+Usar Queue Groups en servicios replicados es algo que se debe hacer si no quiero terminar con 4 servicios insertando el mismo usuario.
+
+			VIDEO 292 MANUAL ACK MODE(modo de accionamiento manual)
+
+Al crear una subscripción como listener,solo los dos primeros argumentos(el canal/tópico y el Queue Group) son proveidos como strings.El tercer argumento son las opciones restantes que podemos establecer a la hora de crear una subscripción(ttl de los mensajes,ttl de cierre de la conexión,...).
+
+* En la mayoria de librerias estas opciones serían un Object,pero aqui van a ser métodos encadenados al más puro estilo JQuery. 
+
+const options = stan.subscriptionOptions().setXXX().setManualAckMode()... <- se encadenan
+
+* Entre estas opciones hay una que siempre querré usar,ya que por defecto NATS marcará cada publicación enviada como completada solo por entregarla.
+Esto no puede dejarse así,por ejemplo,...¿y si fallará despues el servicio listener al guardar data en la BD?.Perderíamos ese evento,pues fue marcado como entregado y completado.
+Para cambiar este comportamiento por defecto(lo cual queremos y tenemos que hacer) está el método setManualAckMode(true).Ack viene de Aknowledge(reconocimiento).
+Básicamente queremos pasar de automático a manual.Recae en nosotros decirle al servidor NATS que hemos recibido y procesado lo que fuere y terminado exitosamente con ese evento,para ello hay que mandarle un Aknowledgement.
+IMPORTANTE: el server NaTS tiene un tiempo por defecto de espera para esa confirmación/Aknowledgement.
+Es terriblemente importante informar a NATS(con el método message.ack()) ya que si no va a mandar cada 30 seg el evento,hasta que reciba confirmación en cuanto esté en modo manual.
+
+subscription.on('message', (msg:Message) => {
+
+   ...do things...
+
+msg.ack(); <- es como next,se queda bloquedo si no se lo mando
+
+
+			VIDEO 293 CHECKS FOR CLIENT HEALTH
+
+Si ahora mismo paro(con rs) los dos listener y publico rápidamente un Object,muy probablementelo recibiré al de 30 segundos(es posible que de vez en cuando se pierda un evento también).¿Porqué sucede esto?Tiene que ver como como NATS interpreta la desconexión de un listener.
+
+Habrá que hacer algo de debugging.Recordemos que en nuestro config.yaml expusimos dos puertos,el 4222 para el server y el 8222 para monitoring(es una interfaz web en ese puerto).
+
+Es aqui,en el monitoring, donde están almacenados estos eventos.Para acceder al puerto de nuevo hay que hacer un port-forwarding.
+k port-forward <NatspodId> 8222:8222
+
+* Ahora puedo ir a localhost:8222/streaming en un browser.Veré información útil sobre el server NATS,como por ejemplo a que cluster está conectado o los clientes y su id:
+
+  "cluster_id": "ticketing",
+  "server_id": "2AcPmD1VsEGbmRw9HV9UF4",
+  "now": "2021-08-13T17:24:55.860602765Z",
+  "offset": 0,
+  "limit": 1024,
+  "count": 3,
+  "total": 3,
+  "clients": [
+    {
+      "id": "1bcf57ee0537",
+      "hb_inbox": "_INBOX.10MNSGYY3KQLODJZTJKN13"
+    },
+    {
+      "id": "abc",
+      "hb_inbox": "_INBOX.S6NXNXU2UR3Y9EV0T0AU6S"
+    },
+    {
+      "id": "c984375d5837",
+      "hb_inbox": "_INBOX.VIJO3WR1LS89D7F0QHE88B"
+    }
+  ]
+}
+Lamentablemente,la información llega hasta ahi.Pero si navego a localhost:8222/streaming/channels?subs=1 veré mucha información sobre los canales, y si reinicio otro listener veré que tengo uno de más durante unos segundos(y al que le pueden mandar un evento y perderlo por ello).
+* Hay tres porque NATS establece un tiempo por defecto antes de cerrar un cliente,pues podría haber pasado algo con la conexión de ese cliente,por ejemplo,asi que no termina la conexión al momento.Esto es un problema realmente,pues puedo perder eventos o replicarlos si no lo controlo.
+Es aqui donde entra el Graceful Shutdown para que no ocurra esto,pues es un comportamiento que me puede hacer perder eventos.Fijate que es importante controlar esto,es un grave error no hacerlo(parece que el ttl que deja antes de desconexionar lo establece los heartbeats realmente)
+
+			VIDEO 295 GRACEFUL CLIENT SHUTDOWN
+
+You don't have to open a new window, you can port forward both ports with one command. You also don't have to know the name of the pod.
+
+>kubectl port-forward deployment/nats 4222 8222
+
+By default it'll listen on the same port if you don't specify one.<- máquina hablando
+
+Hemos descubierto que en los argumentos que le pasamos en el deploy establecimos 5s de espera o dos intentos(los heartbeats o hb).
+De alguna forma debemos informar al servidor NATS que un cliente se ha desconectado y que no haga intentos ni espere esos segundos,ese cliente se desconectó simplemente.
+
+Voy a interceptar las señales Interrupted y Terminated de Node con dos middlewares:
+process.on('SIGNINT', () => stan.close());
+proces.on('SIGTERM', () => stan.close());
+* Esto se traduce en,si recibes una señal SIGTERM o SIGNINT primero trata de cerrar stan.
+Y en stan tengo esto en el close:
+stan.on('close', () => process.exit()); <- close me lo dan ellos ya
+
+Esto lo podré comprobar apagando un cliente y refrescando la url de los clientes,ya no deberé ser capaz de ver 3,pues se desconectó totalmente.
+En Windows puede que no funcione perfectamente ya que las señales son diferentes.
+Puede que parezca mucho código para algo que no es importante.Pero retrasar 20 o 30 segundos un evento puede repercutir gravemente en el workflow de la aplicación,recibiendo antes el siguiente evento que ese evento y desencadenando en un fallo grave.Esto lo vamos a ver en el siguiente video
+
+				VIDEO 296 CORE CONCURRENCY ISSUES
+
+* VIDEO SUPER IMPORTANTE
+Vamos a imaginar por un momento que estamos en una aplicación diferente(una bancaria),en la que el publisher emite eventos  a los canales account:deposit y account:withdraw.
+
+En el canal account:deposit el usuario mandará eventos para depositar dinero y en el canal account:withdraw se retira dinero.
+El grupo se llama 'myQueueGroup'.Hay dos listener y un publisher.
+
+Cuando el publisher publique un evento al server NATS,el server lo mandará a uno de los listener.Entonces se abrirá un archivo y se actualizará la cantidad de la cuenta
+
+Por ejemplo podriamos tratar de ingresar 70 + 40 y despues retirar 100.Pero,imagina que la primera vez el listener falla en abrir ese archivo porque otro proceso lo tiene abierto.
+También puedo haber un fallo de lógica,etc.. puede haber muchas razones para el fallo.
+
+También un listener podria correr más rápido que otro,adelantandose cuando no debería,pues su evento iba después.
+Como hemos visto en los últimos videos,incluso NATS puede pensar que un cliente está vivo por esos 30 o 40 segundos cuando en realidad no lo estaba.
+
+Otro error posible es que recibamos el mismo evento dos veces.(por ejemplo que tarde 29.999999 segundos en abrir ese archivo y NATS envie de nuevo el evento,pero realmente se procesó en el último milisegundo )En este caso retirariamos dos veces 100€ etc...
+
+			VIDEO 297 COMMON QUESTIONS	
+
+1ª: estos problemas no son por usar NATS.Cualquier event-bus tendrá los mismos problemas de concurrencia.
+2ª: no son exclusivos de usar comunicación asincrona entre microservicios.Cualquier aplicación monolítica tendrá los mismos problemas.
+
+Solución mala 1: correr una única copia de ese listener(de la app que tuviera el listener).Ni siquiera corregirá problemas como que el archivo no se abra o se abra en el último momento.Además es un posible cuello de botella para la app.
+
+Solución mala 2: imaginar cada posible error y crear código para manejarlo.Inconvenientes: infinidad de errores,el ingeniero vale dinero.También debo tener en cuenta que muchas situaciones nunca se van a dar,o si se dan una vez cada 10 años y hay un fallo eso es asumible.
+
+	VIDEO 298 THREE MORE POSSIBLE SOLUTIONS TO CONCURRENCY ISSUES
+
+
+Solución UNO: compartir el estado(secuencia de eventos) entre listeners(puede hacerlo cualquier Db).Si por ejemplo el Listener B recibe un evento con el numero 2 mirará en esa BD que se haya realizado el uno.Si no se ha finalizado el UNo no lo hará.Si bien esta solución asegura que los eventos se cumplan tiene grandes problemas de performance
+Downsides: esto hace que el código sea síncrono y secuencial,haciendolo terriblemente lento.No es una solución factible por ello.
+
+Solución DOS: añadir una capa de abstración en los Listeners,como el user al que va dirigido.En este caso ,si el evento A fallará el B no tiene que esperar si va dirigido a otro usuario.Puede parecer una buena solución,pero no lo es.
+Al crear esta capa hay que crear ,por ejemplo, los canales account:deposit:jin(para el user jin) ó account:deposit:mary para el user mary( y asi por cada user,igual que una ruta dinámica).Por defecto, NATS solo permite 1000 canales,asi que podría quedarme sin canales.También hay problemas de performance ya que podrían llegar a ser muchas operaciones.
+
+Solución TRES: almacenar los eventos en el Publisher(con algun tipo de DB).También habrá un campo con la secuencia de los eventos y otro para el último evento fullfilled por cada usuario(es decir que la solución tres es una evolución de la dos).
+Cada Listener mirará al recibir un evento si realmente se ha perdido alguno por el camino o ese evento es realmente el siguiente.Ejemplo(evento 1: {1-Jin-Deposit-null), evento 2: {2-Jin-Deposit-1},evento 3: {3-Mary-withdraw:null)).De esta forma sé que el evento 3 va antes del 2 y el último campo es el número del evento anterior entregado por usuario. 
+Si bien esto empieza a ser una buena solución implementable también tiene downsides: en realidad no se puede mandar nada hacia el publisher,pues él sólo envia datos.Quitando esta limitación técnica,es una buena solución
+
+					VIDEO 299 SOLVING CONCURRENCY ISSUES
+
+Realmente,los problemas que tenemos son por un diseño pobre de nuestra aplicación.Vamos a rediseñar el proyecto y,a medida que lo hagamos,veremos aparecer la solución enfrente nuestro.
+Repasemos un poco como se trata un CRUD de cualquier recurso en Microservices:
+1º: network request to Create/Update/Delete resource XXX
+2º: there is a Service that owns resource XXX
+3º: That service store the resource in a DB and emmits an event to NATS(or any bus-event)
+4º: The bus-event emit an event to any other Service that needs to update its data based upon that First Event
+Fijate que la primera app que hice describe perfectamente este comportamiento,pero aqui nos hemos lanzado a enviar el evento del paso 4 sin importarnos nada más.Pero,¿que tipo de eventos estamos emitiendo?.Intentemos configurar los pasos anteriores:
+
+Bien: siguiendo este patrón tendremos network request para crear una transacción(ya sea deposit o withdraw).Debería haber un Service llamado Transaction que sea dueño y responsable de estas transaciones(paso 2).Las guardará en una DB e informará al bus-event(paso 3).
+Al hacer esto es importante que es lo que guardamos,guardaremos algo muy parecido(o igual) a la solución TRES del video anterior:
+{ transaction:created, type: withdraw,id:fjlkdfj(id de la transacción),userId:klfjsd,sequencePosition:1} <-es éste último campo el que arregla todo.
+En la solución anterior el problema estaba en que NATS no podia realizar algunas acciones(comunicarse con él,pues es de one way).Pero en este caso tendremos un Service Transations con una DB que tiene guardadas las transacciones,y el NATS no tiene que hacer nada.
+NATS mandará la transacción uno y si por un casual el Listener no consigue realizar la acción(ack) la dos nunca se realizará(ya que no está el uno) y como cada servicio se comunica con una DB no hay perdida de datos y el NATS no tiene que realizar más trabajo del que es capaz de hacer(emitir eventos y reemitirlos si el Listener no confirma que lo ha recibido).
+También se soluciona el tema de los usuarios,pues también se categoriza por usuarios,asi que hay transacciones en paralelo(la única regla es que la transacción en la posición 2 nunca va a ser tratada si no se trató la Uno.REbotará contra el NATS que la enviará de vuelta.
+Resumen:si bien la mayoría de la solución era añadir ese Field de tipo Number con el indice de la transacción también faltaba que hubiera un Service con una DB guardandolo,dado que NATS esta limitado
+Fijate que nosotros realmente vamos a trabajar con Tickets y no son una sucesión como si lo son las transacciones.Cada Ticket en sí es algo independiente.Sin embargo este approach nos valdrá perfectamente.
+
+		VIDEO 300 ADDING THIS SOLUTION TO OUR TICKETS SERVICE
+
+Recuerda que los tickets no están implicamente relacionados entre sí,pero lo que vamos a hacer es crear un campo 'version'.Cuando se cree el ticket será la versión 1 y cuando se actualice una vez será la 2.
+Asi el resto sabrá si el ticket es correcto(si en la BD van por la versión 4 y yo veo la 3 el precio no es correcto,es una versión antigüa del ticket)
+En ese caso se devuelve el Event al NATS y no se pone el aknowlegde en true(esto para cualquier acción que tenga un numero de version que no sea el anterior + 1)
+Recuerda que todo esto no da fallos porque hay un ResourceService creado que liderará este versionNumber(recuerda,el flujo es: un usuario quiere crear un Ticket,el TicketService lo crea,lo guarda en la DB y lo manda al NATS)
+Asi que ese TicketService es que tiene los datos persistidos correctamente.Cualquier otro servicio nunca va a tener control sobre esto.Cada Recurso es liderado por su Servicio del mismo nombre.
+Además,cualquier servicio si quisiera saber la última versión solo tiene que consultar al Servicio que lidere ese recurso
+Lo único que tengo que tener en cuenta es si un Event es rechazado permanentemente,no dejando pasar a los demás,porque por alguna razón sea improcesable.
+
+					VIDEO 301 EVENT REDELIVERY
+
+De igual forma que hicimos en la primera app,si un servicio que está escuchando al NATS(un Listener) se cayerá tiene que poder recuperar todos los eventos que se emitieron mientras estuvo offline.
+Si miro la documentación de la interfaz SubscriptionOptions veré algunos métodos interesantes:
+
+declare interface SubscriptionOptions  {
+    durableName?: string;
+    maxInFlight?: number;
+    ackWait?: number;
+    startPosition: StartPosition;
+    startSequence?: number;
+    startTime?: number;
+    manualAcks?: boolean;
+ setMaxInFlight(n: number):SubscriptionOptions;
+
+    /**
+     * Sets the number of milliseconds before a message is considered unacknowledged by
+     * the streaming server.
+     */
+    setAckWait(millis: number): SubscriptionOptions;
+
+
+    /**
+     * Configures the subscription to start with the message having the specified
+     * sequence number.
+     *
+     * @param sequence
+     */
+    setStartAtSequence(sequence: number): SubscriptionOptions;
+
+
+    /**
+     * Configures the subscription to replay with the last received message.
+     */
+    setStartWithLastReceived():SubscriptionOptions;
+
+    /**
+     * Configures the subscription to replay from first available message.
+     */
+    setDeliverAllAvailable():SubscriptionOptions;
+
+    /**
+Éste último setDeliverAllAvailable() va a mandar todos los eventos.Si bien esto no es muy razonable en cuanto sepa en que posición estaba el último que emitió el Service que se cayó ya tengo todos los que se ha perdido.
+Para ello habrá que complimentar este método con otro más.
+
+				VIDEO 302 DURABLE SUBSCRIPTIONS
+
+Una DurableSubscription va a ser creada cuando dé un identificador a una subscription al crearla.Veamos como hacer esto(método setDurableName(name:string):
+
+Cuando se crea una subscripción con un identificador(nombre) internamente NATS va a crear un registro con todos los eventos para ese namespace.
+Además cada vez que emitamos un evento,NATS va a consultar en ese registro si esa subscripción ha recibido y procesado ese evento.
+Cuando sea procesado guardará ese estado también,en esa subscripción,diciendo que el evento 1 fue procesado.
+Imaginemos que ahora el Listener se cayerá habiendo procesado sólo el evento 1 y recuerda es una DurableSubscription.NATS recibe los eventos 2 y 3 y el Listener vuelve a conectarse(IMPORTANTE,DEBE CONECTARSE CON EL MISMO IDENTIFICADOR).
+NATS mirará en sus registros y dirá: bien,para esta subscripción se procesaron los eventos 1,pero le faltan el 2 y el 3,asi que se los mandará.
+En resumen una DurableSubscription es fantástica ya que se asegurá que no pierdas eventos y además no te manda todos al reconectarse,sólo los que perdiste( a diferencia de setDeliverAllAvailable().
+
+Puede parecer que ya no necesitamos este método setDeliverAllAvailable pero lo necesitamos para los primeros eventos que se creen antes de que entre en acción la DurableSubscription.
+Si se cayerá el Listener,la primera vez que caiga,por ejemplo,los 100 primeros que ocurrieran antes de la SUBSCRIPTION me los devolverá setDeliverAllAvailable() y el resto setDurableName().Pero fijate que esos 100 primeros pasarán al registro del NATS para esa subscripción,asi que cuando caiga otra vez,y ya desde aqui para cuando caiga los devolverá la subscripción(pues esos 100 se procesaron y NATS los marcó como procesados.
+Asi que puedo observar que necesito setDeliverAllAvailable para los eventos que ocurran antes de la Subscripción y la propia subscripción.Necesito ambos.
+IMPORTANTE: No sólo eso,sino que si no hay un grupo NATS tiene un comportamiento algo errático y borrará ese registro(lo hace por motivos de memoria).Asi que aún tengo que estar en un grupo en el canal.Es decir,que oblitariamente hay que realizar estos tres pasos:
+
+ const options = stan
+    .subscriptionOptions()
+    .setManualAckMode(true)
+    .setDeliverAllAvailable()
+    .setDurableName('accounting-service')
+
+   const subscription = stan.subscribe('ticket:created','OrdersServiceQueueGroup',options);
+
+Resumen: en realidad tiene mucho sentido esto,mientras no esté en un grupo NATS simplemente hace limpieza,pero estar en un grupo forzará a que guarde el registro.Además,siempre es asi esto,simplemente.
+
+			 SECTION 15 CONNECTING TO NATS IN A NODEJS WORLD
+
+				VIDEO 303 REUSABLE NATS LISTENERS
+
+Fijate que hemos creado un montón de boilerplate para publicar/recibir un simple mensaje.Vamos a refactorizar esto con una clase abstracta y con las siguientes propiedades que tendrá refactorizaremos todo:
+1-abstract subject:String (nombre del canal que el Listener va a escuchar)
+2-abstract onMessage:(event:EventData) <- función a ejecutar al recibir un mensaje
+3-cliente:Stan <- preinicialización del cliente NATS
+4-queueGroupName: string <- nombre del grupo al que el Listener se unirá
+5-ackWait: numbre <- numero de segundos para el modo ack(30s por defecto)
+6-subscriptionOptions:SubscriptionOptions <- opciones de la Subscripción
+7-listen: ()=>void <- codigo para settear la subscripción
+8-parseMessage(msg:Message)=> any :helper function para parsear un Message
+* Fijate que subject y onMessage serán abstractas.
+En realidad crearemos esta clase Listener y habrá dos que hereden de ella,serán TicketCreatedListener y OrderUpdateListener.
+Como su nombre indica una clase miraŕá por el evento ticket:created y la otra por eventos order:update 
+
+					VIDEO 304 ABSTRACT CLASS LISTENER
+
+Código de la clase abstracta:
+
+abstract class Listener {
+   abstract subject:string;
+   abstract queueGroupName:string;
+   private client: Stan;  
+   abstract onMessage(data:any,msg:Message):void;
+   private ackWait = 5 * 1000; // hay 5 secs para confirmar
+
+   subscriptionOptions() {
+      return this.client
+        .subscriptionOptions()
+        .setDeliverAllAvailable()
+        .setManualAckMode(true)
+        .setAckWait(this.ackWait)
+        .setDurableName(this.queueGroupName);
+   }
+
+   listen(){
+      const subscription = this.client.subscribe(
+         this.subject,
+         this.queueGroupName,
+         this.subscriptionOptions()
+      );
+
+      subscription.on('message', (msg: Message) => {
+         console.log(
+            `Message received: ${this.subject} / ${this.queueGroupName}`
+         );
+         const parsedData = this.parseMessage(msg);
+         this.onMessage(parsedData,msg);
+      })
+   }
+
+   parseMessage(msg: Message){
+      const data = msg.getData();
+      return typeof data === 'string' 
+        ? JSON.parse(data)
+        : JSON.parse(data.toString('utf-8'))
+   }
+
+   constructor(client: Stan) {
+      this.client = client;
+   }
+}
+
+				VIDEO 305 EXTENDING THE LISTENER CLASS
+
+Realmente es fácil ver los siguientes pasos.Una clase extenderá de Listener configurando lo necesario según que clase sea:
+import { Message } from "node-nats-streaming";
+import { Listener } from "./base-listener";
+
+export  class TicketCreatedListener extends Listener {
+   subject = 'ticket:created';
+   queueGroupName = 'payments-service';
+
+   onMessage(data: any, msg: Message) {
+      console.log('Event data!',data)
+      msg.ack();
+   }
+   
+}
+* Además vamos a sacar ambas clases a archivos externos para una mejor distribución del scaffolding del proyecto
+
+				VIDEO 307-308 SUBJECTS ENUM
+
+Realmente sería genial que supieramos que si el subject es de tipo ticket:created tendrá unas propiedades(title,id y price) y si es de otro tipo(aqui sólo tendremos ticket:created ó order:updated) tendrá otras( olderPrice,newPrice,newtitle,...).Esto lo vamos a conseguir con un ENUM.
+También vamos a abstraer el tipo del Subject de forma similar a los types de un Reducer.
+
+* IMPORTANTE: recuerda esto,en Typescript los dos puntos son para el tipado,luego cuando asigne valores a propiedades sólo me queda el '=':
+export enum SubjectTypes {
+  TicketCreated = 'ticket:created',
+  OrderUpdated = 'order:updated', <- fijate que estoy asignando un valor,no definiendo el tipo como haré con la interfaz.Esto es lo que diferencia y hace que sea un =
+* Recuerda que debo acceder por enum.property e importante,aunque crear este enum parece una tontería me va a permitir evitar typos al llamar al canal,no es tan poco importante como pueda parecer.
+}
+				VIDEO 309 INTERFAZ PARA EL EVENTO
+
+Vamos a crear la interfaz con el tipado de un evento.Fijate como los dos puntos son por el tipo y no hay asignación de valor:
+export interface TicketCreatedEvent {
+ subject:SubjectTypes.TicketCreated;
+ data: {
+  id:string;
+  title:string;
+  price:string;
+} de nuevo,simplemente preguntate si estoy asignando un valor o el tipado.
+
+			VIDEO 310 ENFORCING LISTENER SUBJECTS
+
+Realmente TS es mucho mejor de lo que parece( y más difícil):
+ * Declaro una interfaz
+interface Event {
+   subject: Subjects;
+   data:any;
+}
+
+* Ahora la clase abstracta además debe heredar de Event
+// fijate que en TS puedo acceder al genérico,no sólo se usa para definir reglas de herencia => T['subject']
+export abstract class Listener<T extends Event> {
+   abstract subject:T['subject']; <- al llevar un genérico puedo usar T['property']
+   abstract queueGroupName:string;
+
+Al realizar esto mi clase que hereda de la abstracta necesita un genérico que será la interfaz desarrollado en el video anterior:
+
+export  class TicketCreatedListener extends Listener<TicketCreatedEvent> {
+   // subject: Subjects.TicketCreated = Subjects.TicketCreated; puedo usar este tipado o usar readonly(es como final de java)
+   readonly subject = Subjects.TicketCreated;
+   queueGroupName = 'payments-service';
+
+			VIDEO 311 QUICK NOTE
+
+Typescript si que tiene una keyword como el 'final' de Java que se asegura que una propiedad no pueda cambiarse(recuerda que final es como decir que es una constante.
+TS tiene la keyword readonly.Ésta previene a una propiedad de la clase de poder mutar/cambiar.Con ésto en mente podemos cambiar:
+
+   readonly subject = Subjects.TicketCreated;
+* Fijate que esto es más correcto,pues es justo lo que queremos.
+
+				VIDEO 312 ENFORCING DATA TYPES
+
+No queremos ese data:any,queremos que TS se quejé si la propiedad no existe:
+  onMessage(data: any, msg: Message) {
+Fijate que ya tenemos este tipado en la interface TicketCreatedEvent,en su propiedad data.Asi que usando la sintaxis recién aprendida cambio ese tipo:
+
+onMessage( data: TicketCreatedEvent['data'],msg:Message).
+
+Ahora me dará error intentar usar data.cost o data.name por ejemplo
+
+				VIDEO 313 DONDE USAREMOS ESTE CODIGO??
+
+En este punto puede que me pregunte qué parte de éste código voy a poner en mí módulo common y qué parte usaré en otros servicios.
+La respuesta es que dentro del common definiré la enum Subjects, la abstract Class Listener y las interfaces.Serán los services Payments y Ticket los que despues definan una clase que herede de la abstracta que me traeré del módulo(ya tengo TicketCreatedListener que hereda de Listener<T>,acuerdate).
+El Payments service creará OrderUpdatedListener más adelante(ver imagen 76).
+En la siguiente clase vamos a refactorizar un poco el publisher.ts ya que lo tenemos prácticamente olvidado.
+
+		VIDEO 314 CUSTOM PUBLISHER
+
+Si bien el código funciona realmente podría poner casi cualquier cosa:
+* Original
+  const data = JSON.stringify({
+      id:'1234',
+      title:'concert',
+      price:20
+   });
+
+   client.publish('ticket:created',data, ()=>{
+      console.log('Event published')
+
+* Podria cambiar el price y añadir otra prop y no me da errorr
+  const data = JSON.stringify({
+      id:'1234',
+      title:'concert',
+	  ventas:"sdkf" <- puedo agregarle una propiedad ventas
+      price:'$20' <- puedo porque es data:any
+   });
+	* Puedo poner el canal que quiera
+   client.publish('ticket:createdasdfasf',data, ()=>{
+      console.log('Event published')
+
+* Lógicamente hay que cambiar esto.Vamos a realizar el mismo procedimiento,una clase abstracta en el file base-publisher.Realmente es una clase mucho más sencilla,sólo recibe la conexión y la inicia en el constructor y tiene el tipado para el canal y un método para publicar.No necesita subscripciones como el Listener: 
+
+import { Stan } from 'node-nats-streaming'
+import { Subjects } from './subjects';
+
+interface Event {
+   subject: Subjects;
+   data:any;
+}
+
+export abstract class Publisher<T extends Event>{
+   abstract subject: T['subject'];
+   // el client mejor privado
+   private client: Stan;
+
+   publish(data:T['data']){
+      this.client.publish(
+         this.subject,
+         data,
+         () => {
+            console.log('Event published.')
+         }
+      )
+   }
+
+   constructor(client:Stan){
+      this.client = client;
+   }
+}
+
+Ahora crearemos la clase que hereda de esta que será la que si va en el servicio pertinente:
+
+
+export class TicketCreatedPublisher extends Publisher<TicketCreatedEvent> {
+   // subject: Subjects.TicketCreated = Subjects.TicketCreated;
+   readonly subject = Subjects.TicketCreated;
+}
+
+				VIDEO 315 USING THE CUSTOM PUBLISHER
+
+Aún nos falta usar todo esto.Fijate que todo encaja perfectamente:
+
+stan.on('connect',() => {
+   console.log('Publisher connected to NATS')
+   
+   const publisher = new TicketCreatedPublisher(stan) 
+   publisher.publish({
+      id:'123',
+      title:'concert',
+      price:45
+   })
+* No hay que decirle el canal pues ya lo hicimos al construir la instancia:
+export class TicketCreatedPublisher extends Publisher<TicketCreatedEvent> {
+   readonly subject = Subjects.TicketCreated;  <- cualquier instancia sabe a qué canal conectarse e incluso nunca podrá cambiarlo porque es final/readonly.Está perfecto 
+Recuerda que en npm tengo un username(siempre minusculas,oscargm40) y un nombre de organización oscargmk8s.No son lo mismo.Puedo hacer login con npm login y puedo ver si estoy logeado con npm whoami(si sale el nombre lo estoy).Hay que logearse para npm publish
+
+			VIDEO 316 AWAITING EVENT PUBLICATION
+
+Publicar un evento realmente es una tarea asíncrona.Sería genial que de alguna manera pudieramos esperar:
+await publisher.publish(data) <- queremos hacer esto
+Para ello vamos a envolver este método publish en una Promise en su definición:
+
+publish(data:T['data']):Promise<void>{
+ return new Promise( (resolve,reject) => {
+  this.client.publish(this.subject,JSON.stringify(data),(error) => {
+    if(error){return reject(error);}
+    resolve();
+  }
+})
+}
+Fijate que me ha obligado a especificar que era una Promise<void>.Otro ejemplo:
+public method name(args):Promise<void>{
+ return new Promise( (resolve,reject) => {
+ anotherfunction(args,error => {
+  if(error){return reject(error);}
+  resolve();
+
+})
+* Hacerlo Promise me va a permitir usar un try/catch lo cual es muy bueno.Ha sido una gran idea realizar esto:
+
+stan.on('connect', async () => {
+   console.log('Publisher connected to NATS')
+   const publisher = new TicketCreatedPublisher(stan)
+   try {
+      await publisher.publish({
+         id: '123',
+         title: 'concert',
+         price: 45
+      })
+   } catch (error) {
+      console.log(error)
+   }
+
+				VIDEO 317 COMMON EVENT DEFINITIONS SUMMARY
+
+Un Publisher realmente es como hacer una network request(una petición) por ejemplo como se realizan con axios.Realmente no tiene mucho que testear.Nunca habrá mucha lógica de negocio en ellos ni habrá mucho que testear...
+
+Por otro lado,los Listener son como request handlers(como un controlador).Son otra historia diferente.
+Estos Listener fijate que van a recibir Events.Habrá un montón de lógica de negocio en estos Eventos(o tras recibirlos,etc..Pasaremos mucho tiempo testeandolos,ya que son como un controlador de Node o Servicio de Spring,tienen mucha lógica acoplada.
+
+Vamos a sacarlos al common module y esto hará que cada servicio que lo implemente use las mismas definiciones haciendo los datos,los nombres de eventos,subjects,... y el tipado consistente
+It is just not feasible to only define these events inside each service(feasible=factible,viable,..)
+Fijate que no es viable al 100% que cada servicio lo declare,realmente en un ambiente de microservicios debe haber un montón de data centralizada,es la mejor solución.Está 100% garantizado que replicar todo esto en cada servicio en alguno tendré un typo
+
+IMPORTANTE:sin embargo,tenemos un pequeño problema.Dado que tengo todo en typescript el servicio que quiera implementar está lógica deberá usar TS.
+Si ese servicio usará por ejemplo Java todo esto no vale,pero hay alternativas:
+1- Usar JSON Schema(permite definir estructuras JSON)
+2- Usar Protobuf (una manera de serializar información)
+3- Apache Avro ( es más para Java)
+
+* La mayoría de lenguajes entienden un JSON Schema(es un esquema que define las propiedades,tipos,etc..)Este archivo se puede subir a un registro como GitHub,
+
+* Protobuf permite serializar información de una forma mucho más compacta.Puede ser usado para definir las estructuras y también tiene Cross Language Support
+
+Stephen se decidió por TS por simplicidad y claridad,pero en un entorno con microservicios en varios lenguajes hay que usar un Cross Language Support
+
+				VIDEO 318 UPDATING THE COMMON MODULE
+
+Copio estos 4 archivos,los dos con la abstract,la enum y la interface y los pego en common/src/events.Fijate que me pide instalar node-nats-streaming y además,vamos a definir ya la interfaz para el ticket:updated( y borró el de order:updated,ya lo añadiremos cuando estemos en ése servicio).
+
+* Y también vamos a agregar ya el field userId pues lo hemos declarado en el Modelo.Fijate en la libertad que tengo ahora tras desacoplar esta lógica.
+export interface TicketUpdatedEvent {
+   subject: Subjects.TicketUpdated;
+   data: {
+      id: string;
+      title: string;
+      price: number;
+      userId: string;
+   }
+}
+
+				VIDEO 319 RESTARTING NATS SERVER
+
+Dado que el server sólo almacena en memoria los eventos,es buena idea reiniciarlo ahora,ya que puedo haber mandado algunos incorrectos y tengo todos con el id '123' el cual no es un id válido.
+Dado que tengo el pod con un deploy borrarlo lo levantará de nuevo:
+>kubectl delete pod nats--fjdslkfkldfj
+De momento no lo voy a hacer,pero puedo eliminar el pod en cuanto vea que tengo mucha basura de eventos siempre que lo necesite

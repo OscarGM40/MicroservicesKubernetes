@@ -1,0 +1,1133 @@
+		SECCION 11 INTEGRANDO UNA APP REACT RENDERIZADA EN EL SERVIDOR
+
+			VIDEO 205 STARTING THE APP
+
+Vamos a crear solo la parte de la autenticación en el frente.Crearemos una landing page en la cual habrá un header para que vaya a logearse el usuario.
+
+		VIDEO 206 REMINDER ON SERVER SIDE RENDERING
+
+En una app renderizada en el servidor,el browser va a realizar una petición al NextJS Development Server(usaremos nextjs para el renderizado en el servidor)Internamente este servicio hará peticiones al resto de servicios para fetchear la data,despues creará un DocumentHMTL con mucho contenido en su interior.Despues devolverá este HTML al navegador del user.
+Todo esto se realiza EN EL CICLO DE UNA ÚNICA PETICIÓN.
+La razón principal por la que usaremos este approach es para ver como se implementa renderizado en el servidor en un entorno de microservicios.
+
+
+NOTA IMPORTANTE:
+In the upcoming lecture, we will create our first components and run the Next server. You may see a warning in the terminal or browser console:
+
+Anonymous arrow functions cause Fast Refresh to not preserve local component state.
+
+Please add a name to your function, for example:
+
+Before
+export default () => <div />;
+
+After
+const Named = () => <div />;
+
+export default Named;
+
+This is a linter warning as of React v17 letting us know that it might be wise to use named exports instead.
+
+You can suppress the warning by refactoring from this:
+
+export default () => {
+  return <h1>Landing Page</h1>;
+  };
+  to this:
+
+  const Landing = () => {
+    return <h1>Landing Page</h1>;
+	};
+	 
+ export default Landing;
+ The warning will come up a few more times in this project (and throughout the course) when creating components and can be handled similarly.
+
+Resumen:no exportar funciones anónimas.
+
+			VIDEO 208 BASICS OF NEXT JS
+
+Todo lo que hay que hacer es instalar un par de dependencias y escribir un par de scripts.No hay ningun generador de proyecto o algo parecido.
+Asi que vamos al folder raiz del proyecto y creo el folder client:
+auth>> cd ..
+>>mkdir client && cd client
+>>npm init -y 
+>>npm install react react-dom next
+
+ROUTING EN NEXT JS
+Creemos el árbol del proyecto.Colgando de client creo el folder 'pages'8fijate que no ha creado src).Dentro de este folder voy a crear varios archivos,cada uno exportando un componente.
+NOTA:NextJS sigue un orden muy particular de directorios y archivos,es por ello que no creamos el directorio src y que creamos el directorio pages en la raiz,además los archivos también siguen una convención de nombres.
+NextJS interpretará estos archivos como rutas que se pueden visitar.Por ejemplo,lo que haya en el pages/index.js se mostrará en localhost/ y si creo un archivo pages/banana.js Next mostrará su contenido cuando navegue a localhost/banana
+
+STARTING A NEXTJS PROJECT
+No tiene mucho configurar el package.json para arrancar con next:
+scripts: {
+  "dev":"next" <- no puede ser más fácil
+}
+Nota:fijate que ahora mismo estoy en local,pero esto va a ejecutarse en un cluster de Kubernetes realmente:
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/ticketing/client$ npm run dev
+
+> client@1.0.0 dev
+> next
+
+ready - started server on 0.0.0.0:3000, url: http://localhost:3000
+info  - Using webpack 5. Reason: Enabled by default https://nextjs.org/docs/messages/webpack5
+event - compiled successfully
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+Fijate como compila la mierda esta :):
+event - build page: /
+wait  - compiling...
+event - compiled successfully
+event - build page: /next/dist/pages/_error
+wait  - compiling...
+event - compiled successfully
+event - build page: /banana
+wait  - compiling...
+event - compiled successfully
+wait  - compiling...
+event - compiled successfully
+pero que prehistoric,compilando antes de mandar el HTML... -_-
+
+			VIDEO 209 BUILDING A NEXT IMAGE
+
+Normalmente usar Typescript es más beneficioso que usar Vanilla JS,pero en este caso habría que escribir un montón de código sin apenas beneficio en retorno(en particular es por NextJS).
+Empecemos creando su imagen para Docker:
+**En el Dockerfile
+FROM node:alpine
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY ./ ./
+
+CMD [ "npm","run","dev" ]
+
+La forma de crear la imagen es la misma que cualquier aplicación Node.
+Debo crear un .dockerignore también(fijate que se creó una carpeta .next,también la ignoramos)
+
+Nota: usar dos statements copy like these:
+FROM node:alpine
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY ./ ./
+
+CMD [ "npm","run","dev" ]
+
+es para agilizar ya que Docker cachea las capas asi que si no se cambia nada en los package no se hará el npm install,se pasará al segundo COPY . . haciendo el build más rápido(intenta mirar si siempre te hace el build y cambialo a package.json si sí que lo hace )
+
+			VIDEO 210 RUNNING NEXT IN KUBERNETES
+
+Si voy a usar un entorno local debo hacer el build de la aplicación y subir la imagen al registro.Si voy a seguir como en principio quiero seguir con GC debo seguir con el skaffold.yaml.
+
+>>docker build -t oscargm40/client-ticketing-service . <- a la altura del Dockerfile
+>>docker push oscargm40/client-ticketing-service <- pal registro
+
+Tenemos que realizar tres pasos ahora.El primero es crear el Dpl+Srv.El segundo es añadir el routing en el nginx que manejará este servicio y el tercero es añadir otra entrada en el skaffold.yaml.
+Vamos a crear su Deployment + Service primero.Puedo copiar del 'auth':
+--- 
+apiVersion: v1         
+kind: Service
+metadata:
+  name: client-srv
+spec:
+  selector:
+    app: client
+    type: ClusterIP
+  ports:
+    - name: client
+      protocol: TCP
+      port: 3000  
+      targetPort: 3000
+
+Recuerda que Next salía por el 3000 asi que el servicio tiene que salir por el 3000 también.El segundo paso es añadir otra entrada al skaffold.yaml:
+ - image: us.gcr.io/ticketing-dev-313817/client #
+    context: client #
+    docker:
+      dockerfile: Dockerfile
+    sync:
+      manual: 
+        - src: '**/*.js'
+          dest: .
+
+El único cambio va a ser image.sync.manual.src ya que el proyecto Next no tiene todo dentro de una carpeta 'src'.
+Por último añadimos un nuevo path al Ingress:
+   - path: /?(.*)
+     pathType: "Prefix"
+     backend:
+       service:
+         name: client-srv
+         port:
+           number: 3000
+IMPORTANTE: cada petición entrante va a ser gestionada(su routing) por este archivo Ingress.En cuanto a la propiedad paths,va a tratar de hacer match en orden descendente,asi que fijate que una peticion a /api/users/xxxx va a ser atendida por el auth-srv ya que está primero(igual que las rutas de ReactrouterDOM
+
+Si quiero pasarle variables de entorno a la aplicación cliente:
+**En el next.config.js =>
+module.exports = { 
+  webpackDevMiddleware: config => {
+      config.watchOptions.poll = 300;
+      return config;
+    },
+   env: {
+     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID
+    }
+}
+En el Deployment ya puedo usar esa variable que vendrá del .env¿
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client-depl
+  
+  spec:
+    containers:
+      - name: client
+        image: xxxxxxxx/client
+        env:
+          - name: GOOGLE_CLIENT_ID
+            value: xxxxxxxxx 
+            .....
+
+			VIDEO 211 NOTE ON FILE CHANGE DETECTION			
+
+NextJS no siempre va a detectar bien los cambios cuando está en un contenedor Docker(recuerda que npm i next es lo que ha convertido a la app React en Next).Asi que nos vamos a crear el archivo de configuración next.config.js en la raiz del proyecto
+
+module.exports = {
+   webpackDevMiddleware: config => {
+         config.watchOptions.poll = 300;
+		       return config;
+      }
+ }
+Este archivo será cargado automáticamente configurando a Next con la middleware para que en vez de que el cambio sea instántaneo espere 300 ms.Con esto debería corregirse la deteción de cambios.Si bien no es correecto al 100% con un reseteo de skaffold puedo arreglar esas ocasiones excepcionales
+
+			VIDEO 212 ADDING GLOBAL CSS
+
+Vamos a tener un problemilla con Bootstrap.Bootstrap es un archivo global CSS y Next va a necesitar conectarse a este archivo de una forma muy concreta.El código puede que parezca raro pero es como debe de hacerse con Next por el motivo recién comentado.Lo primero es crear un archivo '_app.js' colgando directamente del directorio pages:
+
+import 'bootstrap/dist/css/bootstrap.css'; <- hay que instalarlo con npm
+
+export default ({ Component, pageProps }) => { 
+  return <Component {...pageProps} />
+  };
+
+¿Porqué hacemos esto?Cada vez que Next coga un componente como el que ya tengo declarado como el index.js o el banana.js no lo va a renderizar en pantalla inmediatamente,en vez de ello lo va a envolver con un componente por defecto suyo ya predefinido.Este se le conoce como <App/> asi que por eso debe llamarse el archivo asi '_app.js'.Desde ahora cada vez que importemos un componente va a pasar por este archivo _app.js y aqui ese component será Component,con lo que le estaremos pasando {...pageProps } a cada componente de regalo.
+Esto es porque sólo se puede importar dentro del app file un arhcivo global como es este boostrap.css
+Cualquier archivo global debe ser pasado de esta forma en Next.
+Por último recordar que hay que instalar el modúlo aún!
+
+			VIDEO 213 ADDING A SIGN UP FORM
+
+Recuerda que up es registrarse e in es logearse.Acuerdate de in es entrar!!.El formulario de ingreso lo quiero ver en /auth/signup asi que tengo que crear el archivo asi 'pages/auth/signup.js'.Realmente es bastante sencillo saber donde va cada componente.
+
+			VIDEO 214 HANDLING EMAIL AND PASSWORDS INPUTS
+
+Usaremos Hooks en este proyecto,de momento creamos un formulario simple con React y Bootstrap:
+const signup = () => {
+
+   const [ email, setEmail ] = useState("");
+   const [ password, setPassword ] = useState("");
+
+   const handleSubmit = (event) => {
+      event.preventDefault();
+
+      console.log(email,password)
+
+   }
+
+   return (
+      <form onSubmit= { handleSubmit } >
+         <h1>Sign Up</h1>
+         <div className="form-group">
+            <label htmlFor="">Email Address</label>
+            <input type="text" 
+            className="form-control" 
+            value={email}
+            onChange={ e => setEmail(e.target.value) }
+            />
+         </div>
+         <div className="form-group">
+            <label htmlFor="">Password</label>
+            <input type="password"
+             className="form-control" 
+             value={password}
+             onChange={e => setPassword(e.target.value) }
+             />
+         </div>
+         <button type="submit" className="btn btn-primary">Sign Up</button>
+      </form>
+   )
+}
+Ahora habría que comunicar esto con nuestro servicio auth-service de alguna forma.
+
+			VIDEO 215 SUCCESFULL ACCOUNT SIGNUP
+
+Vamos a gestionar un nuevo registro de usuario nuevo exitoso en la aplicación.Recuerda que nuestro auth service tiene una ruta para ello '/api/users/signup',pero que tenemos varias capas de abstración entre la app Next y el servicio Auth.
+Tenemos el Ingress-nginx server,tenemos el ClusterIP Service de la app Client,depues el Cluster IP service de 'auth' y por último el Pod,dentro de él está la aplicación Express que es hacia donde hay que enrutar la petición.
+
+Para realizar esto vamos a usar la librería Axios,asi que me situo en la raiz del proyecto client e instalo axios:
+>>npm i axios
+Ahora hay que esperar a que se haga el build de nuevo de la imagen.Cuando termine ya puedo importar axios y hacer una petición POST en el onSubmit tratando de enviar una petición de registro al backend(axios.post(url,body).
+En teoría ya deberé de ver la cookie en Network,signup y ver encabezados,aunque aun queda recoger los errores,etc...
+
+		VIDEO 216 HANDLING VALIDATION ERRORS
+
+Para capturar los errores vamos a englobar la petición POST en un try/catch.Despues los mostramos condicionalmente a su longitud:
+
+{ errors.length > 0 &&
+   (<div className="alert alert-danger">
+     <h4 className="">Oooppss...</h4>
+       <ul className="my-0">
+        {errors.map(err => <li key={err.message}>{err.message}</li>)}
+       </ul>
+    </div>)
+}
+Fijate que tengo errors en error.response.data.errors (siendo el primer error el que le llame yo al hacer el catch(error).Y es un array,por eso el map.
+
+				VIDEO 217 THE USEREQUEST HOOK
+
+En el componente anterior tenemos lógica que vamos a duplicar en otros componentes,ya que haremos más peticiones.Lo mejor es hacer nuestro propio Hook:
+El hook tendrá tres argumentos:
+1- La url a la que se hará la petición
+2- El método por el que se hará la petición
+3- El body o contenido de la petición
+
+El input va como argumentos,el output(lo que retorne) serán otros dos,la primera será la función para ejecutar el código y la segunda cosa a retornar los errores(por defecto en null).Vamos a retornar un objeto
+
+Con todo esto en mente,creo el directorio 'hooks' en el proyecto y dentro el archivo 'use-request.js':
+
+**Debo llamar a useState con mis propios Hooks 
+import axios from "axios";
+import { useState } from "react";
+
+const useRequest = ({ url, method, body,onSuccess }) => {
+
+    const [errors, setErrors] = useState(null);
+
+    const doRequest = async () => {
+
+        try {
+            setErrors(null)
+            const response = await axios[method](url, body);
+            if (onSuccess) {
+                onSuccess(response.data);
+            }
+            return response.data;
+        } catch (err) {
+            setErrors(
+            <div className="alert alert-danger">
+                <h4 className="">Oooppss...</h4>
+                <ul className="my-0">
+                    {err.response.data.errors.map(err => <li key={err.message}>{err.message}</li>)}
+                </ul>
+            </div>)
+        }
+
+    }
+
+    return {
+        doRequest,
+        errors
+    }
+}
+
+export default useRequest;
+
+		VIDEO 218 USING THE USEREQUEST HOOK
+
+Cada vez que quiera usar mi Hook lo importo y despues creo un estado local:
+  const { doRequest, errors } = useRequest({
+    url: '/api/users/signup',
+    method: 'post',
+    body: {
+      email, password
+    },
+    onSuccess:() => Router.push('/')
+  });
+
+En el onSubmit llamo al doRequest:
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    
+    await doRequest();
+  }
+
+Los errores simplemente llamo a 'errors' donde quiera:
+  </div>
+      {errors}
+
+      <button type="submit" className="btn btn-primary">
+        Sign Up
+      </button>
+Puedes implementar esta solución o seguir con la de Iñaki.
+
+		VIDEO 219 AN ON SUCCESFULL CALLBACK
+
+Cuando un usuario se registre exitosamente queremos redirigirlo a la landing page.Para ello tendremos que aprender como hacer esto en una aplicación NextJS y además tenemos que asegurarnos que sólo lo hacemos tras un signed in exitoso.
+
+Para usar routing en una app de Next es diferente a React.Hay que importar Router desde next/router:
+>>import Router from 'next/router';
+
+Despues sólo hay que llamar a Router.push('ruta como string') cuando quiera.Aunque vamos a usar un 4º argumento boleano 'onSuccess':
+
+onSuccess:() => Router.push('/')
+
+		 VIDEO 220 OVERVIEW ON SERVER SIDE RENDERING
+
+El problema que tenemos con el SSR es que en la primera petición ya tenemos que mandar si el usuario está autenticado o no desde el servidor,asi que hay que realizar una petición al 'auth' para confirmar esto.
+
+Flujo al realizar una peticion a Next:
+1º- Se inspecciona la URL.Se determina el grupo de componentes a mostrar
+Nota:Next sólo va a mostrar los componentes que necesita esa URL(la página LAnding o la página Signup,etc,...)
+
+2º- Para cada uno de los componentes que formen ese grupo que forma la página a mostrar va a llamar al getInitialProps().
+Nota: Next provee una función estática en la que poder iniciar valores o llamar a otras funciones.Es la típica función onInit().Esta función es llamada cuando el componente esta siendo renderizado en el servidor.Es el lugar donde se deben hacer fetch de datos necesarios para el componente.
+
+3º- Una vez que se llama a esta función,cualquier dato que yo devuelva en la funcion va a ser pasado como prop al componente,teniendolo disponible en React.Eso si,sólo sucede una única vez
+
+3- 
+
+const LandingPage = ({ currentUser }) => {
+  console.log(currentUser);
+  axios.get('/api/users/currentuser').catch((err) => {
+	    console.log(err.message);
+  });
+					 
+  return <h1>Landing Page</h1>;
+};
+
+				VIDEO 222 FETCHING DATA DURING SSR
+
+Fijate que tenemos que realizar un fetch de la data para poder ver en el landing Page si el usuario está logeado o no.El único sitio donde podemos hacerlo en en ese método mientras se renderizan los componentes de la página en el servidor,
+Esto va a implicar que,en el SSR, dentro del método getInitialProps() habrá que hacer una petición al servicio 'auth' para comprobar la autenticación.
+Este método es el único lugar donde se puede fetchear data en el proceso de renderizado en el servidor.
+
+LandingPage.getInitialProps = async () => {
+  console.log('I am on the server...');
+
+  const response = await axios.get('/api/users/currentuser');
+
+  return response.data;
+}
+
+Recuerda que en este endpoint mandamos o un null o un object.De todas formas esto no es lo importante,lo importante es que al realizar esta petición en el SSR la tengo disponible en el componente en el CSR.
+Sin embargo todo esto va a desembocar en un error ECONNREFUSED 127.0.0.1:80.Todo esto indica que hay dos ambientes totalmente diferentes,uno en el navegador que funciona bien y otro en el servidor que da error vilmente.
+
+const LandingPage = ({ currentUser }) => {
+    console.log(currentUser);
+    axios.get('/api/users/currentuser').catch((err) =>console.log(err));
+
+    return <h1>Landing Page</h1>;
+};
+
+  
+/* LandingPage.getInitialProps = async () => {
+  const response = await axios.get('/api/users/currentuser');
+
+  return response.data;
+} */
+En el siguiente video sabré porque.
+
+			VIDEO 223 WHY THE ERROR?
+
+Nota: cuando se hace una petición como la anterior en la que se omite el dominio,por defecto se enviará al dominio actual,en este caso /api/users/currentuser se enviará a https://ticketing.dev/api/users/currentuser.
+Teniendo en cuenta que en el /etc/hosts resolvemos este dominio a localhost,no hay problema porque se traduce a 127.0.0.1:80 y lo va a atender nginx,enrutandolo apropiadamente. 
+
+La capa NodeHTTP se comporta de forma similar a un browser.Traducirá el dominio a localhost:80.El problema en el servidor es que estamos en un contenedor y no se va a reenviar al Ingress-Nginx como en el caso anterior(a diferencia de con el CSR que lo redirige afuera,en el SSR lo traduce adentro del cluster y no hay nada en localhost:80 en el cluster)
+
+Al final el error ECONNREFUSED es porque dentro del contenedor no podemos conectarnos a localhost:80,pues no hay nada escuchando alli.
+Nota:fijate que el error de que no puede conectar a localhost:80 no se refier a mi ordenador sino al localhost del cluster.Lógicamente,falla estrepitosamente.
+
+				VIDEO 224 TWO POSSIBLE SOLUTIONS
+
+Solucionar el problema no va a ser muy complicado.Hay dos posibles soluciones:
+
+1ª: La primera solución es configurar Axios dependiendo de si la petición actual se hizo en el navegador o en la aplicación NextJs.
+
+- Si se realiza en el servidor querremos que la petición vaya a http://auth-srv/api/users/currentuser ,asi que de alguna forma tenemos que pasarle el nombre del Service como dominio.
+Recuerda que en navegador en realidad no había problemas asi que no hay que tocar nada en esa parte.
+
+Esto es asi porque el microservicio 'auth' tiene un Service llamado 'auth-srv' que va a ser resuelto por el KubeDNS a la IP correcta,pudiendo entrar al pod 
+Esto es un poco problématico,ya que necesitaremos saber los nombres de los Services e incluso conocer todas las subrutas.Es por esto que no vamos a usar esta opción.
+
+2ª: Lo que vamos a hacer es confiar todo al Ingress Nginx,que ya está corriendo además dentro del cluster(fijate que el Ingress está en el cluster!).
+Ingress-nginx debería ser capaz de resolver los dominios,tanto ahora como en sucesivos casos,pues lo tiene todo en la propiedad paths:
+
+- path: /api/users/?(.*) #nginx sabe que esta ruta es de la app auth
+  - path: /api/users/?(.*) 
+    pathType: "Prefix" 
+      backend:
+        service:
+          name: auth-srv
+          port: 
+           number: 3000
+   - path: /?(.*) # de nuevo nginx sabe que esto es el cliente
+     pathType: "Prefix"
+     backend:
+       service:
+       name: client-srv
+
+También tendremos que arreglar como hacer una petición al Ingress cuando estamos dentro del cluster,porque hay que apuntar al servicio.
+Afortunadamente,solo hay que consultar los servicios del namespace ingress-nginx(es el controller ahora)
+.Además,estamos trabajando con cookies ,y esa petición no tiene ni idea de cookies,es lo último que tendría en cuenta.
+Asi que tendremos que extraer la cookie y pasarla en la petición al Ingress también.
+
+			VIDEO 225 CROSS NAMESPACE SERVICE COMMUNICATION
+
+Cuando quiero,por ejemplo,que el client y el auth se vean puedo realizar una peticion poniendo el nombre del servicio de turno como dominio y Kuernetes lo resolverá a la Ip del servicio gracias al KubeDNS,accediendo al Pod,esto es cierto,pero también deben estar en el mismo namespace para que simplemente llame al servicio por el nombre y KubeDNS lo resuelva a la IP.
+
+Al querer apuntar desde el Cliente hacia el Ingress ya no están en el mismo namespace y es aqui donde se complica un poco realizar una peticion en kubernetes entre diferentes namespaces.
+
+NOTA: Al querer hacer la petición desde el cliente dentro del pod a localhost es cuando tengo ese error ERRCONREFUSSED.Las peticiones deben apuntar a un Service.
+
+Para el microservicio client y auth realizarse peticiones no es problema ,porque están en el namespace default pero el Ingress ni siquiera está en el mismo namespace.
+
+Todos los objetos que creamos en Kubernetes son creados bajo un namespace especifico.Es como una caja de objetos.
+
+Puedo ver todos los namespaces que hay en un cluster con :
+>>kubectl get namespace
+
+oscar@linux-aula0:~/Escritorio/MicroserviciosKubernetesApp$ k get namespace
+NAME              STATUS   AGE
+default           Active   52d
+ingress-nginx     Active   50d
+kube-node-lease   Active   52d
+kube-public       Active   52d
+kube-system       Active   52d
+
+Desafortunadamente el dominio va a ser un poco más complicado.Será:
+http://NameOfService.Namespace.svc.cluster.local 
+*svc.cluster.local indica que es en local y hacia un servicio
+
+*Quedará algo como: http://ingress-nginx-controller.ingress-nginx.svc.cluster.local/api/users/currentUser... 
+
+En este caso el namespace lo acabamos de ver,es ingress-nginx ,pero para saber el servicio tendremos que apuntar al namespace y adicionalmente ver sus servicios con kubectl get services(esto se hace con la flag -n):
+>>kubectl get services -n ingress-nginx
+
+oscar@linux-aula0:~/Escritorio/MicroserviciosKubernetesApp$ k get services -n ingress-nginx
+NAME                                 TYPE           CLUSTER-IP   EXTERNAL-IP    PORT(S)                      AGE
+ingress-nginx-controller             LoadBalancer   10.60.1.30   35.233.85.47   80:32413/TCP,443:31337/TCP   50d
+ingress-nginx-controller-admission   ClusterIP      10.60.3.93   <none>         443/TCP                      50d
+
+NOTA:El servicio ahora se llama ingress-nginx-controller independientemente de la plataforma!
+Tendremos que asegurarnos que le pasamos la cookie también.Pero,está url queda muy larga y es muy fácil confundirse:
+>http://ingress-nginx-controller.ingress-nginx.svc.cluster.local/api/users/currentUser... 
+*Cuando tenga URLs tan complicadas debo crear lo que se conoce como un External Name Service.Un External Name Service básicamente remapea el dominio de una petición,simplificando un poco la tarea.
+Esto no es algo necesario.
+
+			VIDEO 226 WHEN IS GetInitialProps CALLED?
+
+Todo parece claro hasta el momento,pero¿Como demonios sabemos cuando una petición va a ser ejecutada en el servidor y cuando en el servidor por NextJS?
+Vamos a usar esta regla:
+1-Si la request viene de un componente siempre vendrá del browser asi que el dominio puede ir vacio("").
+2-Si la request viene de getInitialProps puede venir tanto del cliente como del servidor!Recuerda que el método se ejecuta en el servidor una única vez asi que podia hacer peticiones alli,de echo es la única forma de mandarle la cookie con el token.
+Sin embargo,esto no es del todo cierto,podría ejecutarse en el browser bajo circunstancias especiales:
+1- Si se hace un hard refresh getInitialProps se ejecuta en el server
+2- Si se hace click en un link desde un domini diferente también se ejecuta en el servidor
+3- Si tipeo la URL en la barra de direcciones también
+
+Pero...
+4- Si navego desde una página a otra MIENTRAS ESTÉ EN LA APP getInitialProps se ejecutará en el CLIENTE!.Esto lo puedo comprobar haciendo un hard refresh o tipeando la URL y no veré el console.log en el browser,sino en el server(en la terminal)
+ 
+LandingPage.getInitialProps = async () => {
+/*   const response = await axios.get('/api/users/currentuser');
+
+  return response.data; */
+  console.log('I was executed')
+  return {}
+} 
+
+[client] event - compiled successfully
+[client] I was executed <- aqui
+[client] LandingPage returned an empty object from `getInitialProps`. This de-optimizes and prevents automatic static optimization. https://nextjs.org/docs/messages/empty-object-getInitialProps
+[client] I was executed
+
+Para comprobar el 4º caso cada vez que se haga un registro exitoso habia una redireccion asi que es la forma adecuada de testearlo.
+Voy a ticketing.dev/auth/signup y registro cualquier user random.
+Veré I was executed por la consola del navegador,confirmando que una redirección dentro de la app hace que getInitialProps se ejecute en el browser en vez de en el server.
+
+Todo esto lo ha hecho Stephen para que entienda que cualquier petición que haga en getInitialProps tengo que preocuparme porque la función se dispara  tanto en el server como en el browser y la URL a la que apuntar me va a cambiar.Veremos como controlar esto  
+* De todas formas ahora se recomienda usar getServerSideProps ya que esta funcion SOLO se ejecuta en el servidor:
+
+In index.js, swap this
+
+LandingPage.getInitialProps = async (context) => {
+  const client = buildClient(context);
+  const { data } = await client.get('/api/users/currentuser');
+  return data;
+};
+to this:
+
+export async function getServerSideProps(context) {
+    const  client = buildClient(context);
+    const  response  = await client.get('/api/users/currentuser');
+  return {
+    props: response.data,
+  };
+} 
+
+		VIDEO 227 ON THE SERVER OR THE BROWSER??
+
+Ahora que sabemos que hay que controlar el dominio debemos aprender como saber si estamos en el server o en el browser.
+ Para ello puedo usar el objeto 'window',ya que sólo existe en el browser.En una aplicación Node el objeto window será undefined por motivo s obvios.
+
+				VIDEO 229 ESPECIFICANDO EL HOST
+
+ Llevemos a código todo lo anterior:
+
+ LandingPage.getInitialProps = async () => {
+
+  if(typeof window === 'undefined'){
+    //estamos en el server
+    // luego tengo que especificar el dominio al completo
+    const { data } = await axios.get(
+      'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local/api/users/currentuser')
+	return data;
+  }else {
+    //si existe el objeto window es que estoy en el browser!
+    //peticiones no necesitan el dominio
+    const { data } = await axios.get('/api/users/currentuser');
+    // {currentUser:{}}
+    return data;
+  }
+   
+  return {}
+} 
+
+Una vez echo esto falta un pequeño detalle.Si voy a la configuración del Ingress(al ingress.srv.yaml) veré que he especificado como host a ticketing.dev:
+
+spec:    
+  rules:
+    - host: ticketing.dev <- aqui
+      http:
+        paths:
+
+El dominio va a cambiar si la petición se hace en el server asi que este valor para la propiedad host no es válida.Podemos comprobarlo con un hard refresh(tirará la app):
+
+Server Error
+Error: Request failed with status code 404
+
+This error happened while generating the page. Any console logs will be displayed in the terminal window.
+
+Esto es porque no conoce el dominio,lógicamente.Esto lo arreglaremos mandando en los headers el Host en la peticion del server:
+
+await axios.get('http:ingrexx...., {
+  headers: {
+    Host:'ticketing.dev'
+  }
+}
+*Esto va a tener prioridad ya que va en la cabecera.Solo un jacinto daría prioridad a un configfile frente a la puta cabecera de la peticion.
+Debería ver un null como currentUser ya que no hemos mandado la cookiesie aún:
+
+tching for changes...
+[client] wait  - compiling...
+[client] event - compiled successfully
+[client] null
+
+			VIDEO 230 PASSING THROUGH THE COOKIES
+
+Una vez explicado todo esto tenemos que pasar la cookie también.Seremos rápido con esto.Cada vez que getInitialProps es llamado en el servidor el primer argumento va a ser un objeto con ciertas propiedades,una de ellas va a ser request.Es el objeto global request de cualquier aplicación express,con lo que ello implica.
+Como la cookie es pasada en los headers veamos por consola primero que hay en ellos:
+
+[client]  'host':'ticketing.dev',
+[client]   'accept-language': 'es-ES,es;q=0.9,en;q=0.8,eu;q=0.7',
+[client]   cookie: 'express:sess=eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcFpDSTZJall3Wm1JeE9HRmtNamczTnpnME1EQXhPVE16TURVM1l5SXNJbVZ0WVdsc0lqb2laSE5xWm14clFHWnpiR3RtYW5Oa2JDNWpiMm9pTENKcFlYUWlPakUyTWpjd05qZzFPRGw5Lm1mY2dGT3RNblFIZWNhandWRzFaNzlETFdhekh3UkE1OFlyNnpSN1NJeEUifQ=='
+[client] }
+
+* Puedo ver que viene tanto el host como la cookie.Fijate que justo despues estamos haciendo una petición,asi que podriamos utilizarla de proxy o intermediaria,pasando propiedades del objeto req a la petición a la API.
+
+ LandingPage.getInitialProps = async ( {req}) => {
+  // console.log(req.headers)
+  if(typeof window === 'undefined'){
+    //estamos en el server
+     const { data } = await axios.get(
+      'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local/api/users/currentuser',{
+        // headers: { Host: 'ticketing.dev' }
+        headers: req.headers <- esta forma ahora
+      })
+      return data;
+
+* Podré ver tanto en el browser como en el server el usuario ahora.
+
+{id: "60fb18ad287784001933057c", email: "dsjflk@fslkfjsdl.coj", iat: 1627068589}
+email: "dsjflk@fslkfjsdl.coj"
+iat: 1627068589
+id: "60fb18ad287784001933057c"
+
+Ya podría comunicarme dentro dl cluster haciendo peticiones a servicios entre namespaces.
+
+* Para los usuarios de minikube:
+Thank you Jose, this also solved 404 problem when accessing ticketing.dev.For minikube users, the url must be updated:
+
+>http://ingress-nginx-controller.kube-system.svc.cluster.local/api/users/currentuser
+Y la petición hay que mandar un header adicional:
+
+      res = await axios.get(
+            'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local/api/users/current',
+            {
+                withCredentials: true, <- este
+                headers: req.headers
+            }
+        );
+
+			VIDEO 232 UNA API CLIENT REUSABLE
+
+El código funciona,pero es un poco complicado.Sería buena idea extraer parte de la lógica en un helper file.
+Crearemos un método llamado builClient,el cual interceptará la incoming request con sus headers.
+Despues crearemos lógica para preconstruir una instancia de axios que trabaje en nuestro environment actual.Veamoslo mejor:
+
+* En el archivo src/api/build-client.js creo esa funcion anónima:
+
+export default ( { req } ) => {
+   if(typeof window === 'undefined') {
+      return axios.create({
+         baseURL:'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local',
+         headers: req.headers 
+      });
+   } else {
+      return axios.create({
+         baseURL:'/'
+      })
+   }
+};
+
+* Fijate que la funcion solo preconfigura a axios con lo que yo quiera,pero no hace peticiones!.Es sólo un estado inicial(parece útil)
+
+* Ya no le pasamos el req desestructurando ,sino todo el objeto,que por convención se le llama 'context'.
+ 
+ LandingPage.getInitialProps = async ( context ) => {
+  const response = await buildClient(context).get('/api/users/currentuser');
+  return response.data;
+} <- pues si que queda simplificada(comprobar que funcione!).
+
+			VIDEO 233 CONTENT ON THE LANDING PAGE
+
+Lo último que tenemos que hacer es comprobar el valor del currentUser(que viene como una prop,recuerda).Si es null es que no está logeado y si es un objeto con valores es que si está logeado.
+
+* De momento enviamos un simple h1
+const LandingPage = ( { currentUser } ) => {
+    return currentUser 
+    ? <h1>You are signed In</h1>
+    : <h1>Your are NOT signed Iny</h1>
+  
+};
+
+* Aunque aun no tengo la funcionalidad creada para el logout puedo ir aen las DevTools a Application y alli en Cookies borrar la cookie.
+
+			VIDEO 234 THE SIGNIN FORM 
+
+Es hora de empezar a trabajar en el sign in o login page.De momento será algo muy sencillo,asi que duplico y renombro el signup cambiando signup por signin en la peticion,los textos,el componente,...
+
+const signin = () => {
+  
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const { doRequest, errors } = useRequest({
+    url: '/api/users/signin', <- cambiar
+
+* Creo un usuario y trato de logearme.Debo ser redireccionado a la Landing Page.
+
+			VIDEO 235 CREANDO EL COMPONENTE HEADER
+
+Dado que el header lo voy a ver en todas las páginas hay dos formas de afrontar su creación.La primera sería meter el <Header /> en cada componente.La segunda será meterlo en en _app.js.De momento luce asi:
+
+import 'bootstrap/dist/css/bootstrap.css';
+
+const _app = ({ Component, pageProps }) => {
+  return <Component {...pageProps} />
+}
+
+export default _app;
+
+Lo que haremos será devolver no sólo ese <Component /> sino mas de uno.Fijate también que este nuevo componente <Header /> va a necesitar acceso al currenUser,ya que mostrará condicionalmente Sign Up & Sign In con sus Links o Sign Out si ya esta logeado el usuario.
+Esto es un pequeño problema tal como tenemos la lógica,pues sólo el componente LandingPage(que está en el index.js) conoce ese estado,ya que realiza únicamente él la petición.
+Tiene mucho más sentido descentralizar esa petición y subirla a lo más alto de la app.Veremos que esto da algun problema que hay que resolver
+
+					VIDEO 23X MOVING GET INITIAL PROPS FROM LANDING PAGE
+
+Desafortunadamente,al mover getInitialProps(context) al App,que es un componente que devuelve una página(la cual es otro componente),pero App no es una página,al llamar a getInitialProps desde un Componente cambian sus argumentos.
+Ya no recibirá context==={req,res} si no que recibirirá context ==={Component,ctx: {req,res}} con lo hemos movido el objeto global req.
+
+Esto tendrá impacto en la función que usamos para simplificar la lógica:
+const  presetingAxios = ( { req } ) => {
+Ya no estará como primer argumento sino como segundo anidado en 'ctx'
+
+* Lo imprimimos y hacemos un hard refresh
+_app.getInitialProps = (appContext) => {
+    console.log(Object.keys(appContext));
+    return {};
+};
+El resultado es este:
+[client] event - compiled successfully
+[client] [ 'AppTree', 'Component', 'router', 'ctx' ]
+ 
+Desfortunadamente al atar getInitialProps a _app la otra getInitialProps del componente LandingPage no es invocada automáticamente más.
+
+					VIDEO 238 HANDLING MULTIPLE GETINITIALPROPS
+
+Dado que ahora estamos llamando a getInitialProps en dos lugares y uno ha quedado desactivado lo llamaremos en el mismo lugar.
+LLamaremos a _app.getInitialProps y a LandingPage.getInitialProps y mandaremos el resultado como props hacia abajo hasta LandingPage o donde sea necesario.
+Si hago un console.log de todo el objeto veré esto:
+
+Watching for changes...                                               [95/563]
+[client] wait  - compiling...                                            
+[client] event - compiled successfully                                   
+[client] {                                                                
+[client]   AppTree: [Function: AppTree],                                 
+[client]   Component: [Function: LandingPage] {                           [client]     getInitialProps: [AsyncFunction (anonymous)]                 [client]   },                                                             [client]   router: ServerRouter {                                             [client]     route: '/',                                              [client]     pathname: '/',             
+Puedo ver que en Component tengo un array con los Componentes que renderiza este componente App,en este caso renderiza a LandingPage.
+Asi que podré usar Component.getInitialProps y estaré ejecutandola sobre es componente.Básicamente desde un componente tengo acceso a él mismo y a todos los que renderize en Nexts a través de getInitialProps.
+
+_app.getInitialProps = async (appContext) => {
+  // LLamada para el app.getInitialProps
+  const client = buildClient(appContext.ctx)
+  const { data } = await client.get('/api/users/currentuser');
+
+  // llamada para el hijo
+  const pageProps = await appContext.Component.getInitialProps(appContext.ctx);
+
+  console.log(pageProps)
+  
+
+* Puedo ver que se ejecuto el de el hijo también.
+[client] LANDING PAGE!!!
+[client] {
+[client]   currentUser: {
+[client]     id: '60e57df015308c001b4a17cc',
+[client]     email: 'test3@test.com',
+[client]     iat: 1625652720
+[client]   }
+[client] }
+
+					VIDEO 239 PASSING PROPS THROUGH
+
+Cambio el return para acceder a los dos:
+
+    return {
+      pageProps,
+      ...data
+    };
+
+Y le mando al hijo el currentUser:
+const _app = ({ Component, pageProps, currentUser }) => {
+
+* Esto ha sido bastante complicado.Sin embargo usar SSR dará otro tipo de beneficios.
+
+						VIDEO 240 BUILDING THE HEADER
+
+Creamos el componente Header y ojo,para usar un enlace en NextJs hay que usar su componente Link,además de un <anchor>:
+
+import Link from 'next/link';
+
+const Header = ({ currentUser }) => {
+    return (
+      <nav className="navbar navbar-light bg-light">
+          <Link href="/">
+              <a className="navbar-brand">GitTix</a>
+          </Link>
+
+          <div className="d-flex justify-content-end">
+              <ul className="nav d-flex align-items-center">
+                  { currentUser ? 'Sign out': 'Sign In/up'}
+              </ul>
+          </div>
+En el siguient video crearemos los enlaces a Sign Out/In/Up en vez de simples strings.
+
+				VIDEO 241 CONDITIONALLY SHOWING LINKS
+ 
+Veamos un pequeño truco para mostrar <li>s condicionalmente.
+
+    const links = [
+        !currentUser && { 
+          label:'Sign Up', href:'/auth/signup'  
+        },
+        !currentUser && { 
+          label:'Sign In', href:'/auth/signin'  
+        },
+        currentUser && { 
+          label:'Sign Out', href:'/auth/signout'  
+        },
+    ].filter( link => link)     
+    // esto dará [false,false,{label:'xxx'}] ó 
+    // [{ data },{ data },false] 
+Ahora hay que iterar sobre ese array cogiendo sólo los verdaderos,hacer un filter con un simple return quitará cualquier valor false.
+Por último termino de arreglar el componente con sus Link y <a>:
+
+    ].filter( link => link)
+    .map( ({ label, href }) => {
+        return (
+        <li key={href}
+            className="nav-item">
+            <Link href={href}>
+              <a className="nav-link">{label}</a>
+            </Link>    
+        </li>)
+    })     
+
+Recuerda devolver este elemento:
+              <ul className="nav d-flex align-items-center">
+                  { links }
+              </ul>
+
+				VIDEO 242 HANDLING SIGNING OUT
+
+Recuerda que para hacer el sign out tengo un endpoint en el Servicio 'aut',por post a ('/api/users/signout').
+Esta petición tendrá que venir de un componente y no del getInitialProps.Hay que asegurarse que la manda el frontend y no el server.
+
+To sign out, the server sends down a new cookie that replaces the existing one.  It is equivalent to doing something like a 'localStorage.setItem(null)'
+* Es por esto que hacer el logout borra la cookie.
+
+					SECCION 12 CODE SHARING BETWEEN SERVICES
+
+						VIDEO 244 SHARED LOGIC BETWEEN SERVICES
+
+Nuestro auth service,aunque esté medio terminado,en realidad no tiene mucho que comunicar con el resto de servicios.Podria emitir eventos para el sign in o el sign out pero de momento lo dejaremos para más adelante.
+Lo que haremos será centrarnos en el siguiente servicio.Va a ser el ticketing Service.Este servicio listará todos los tickets creados que están a la venta.También podrá mostrar detalles sobre un determinado ticket.
+Adicionalmente también podrá crear y editar uno(get all,get one,post y put).Todo menos borrar.
+Este servicio va a necesitar del bus de eventos,asi que en cuanto tengamos algo básico pasaremos a crear el bus.
+Para crear y editar un ticket vamos a pedir que el usuario esté autenticado.Esto se traduce en que este servicio necesitará algun tipo de middlewareAuthMiddleware que inspeccione la cookie y valide el jwt.
+De alguna forma si no esta autenticado se le informará al usuario.
+* Como puedo ver tengo ya un montón de lógica creada que además va a ser reusada no sólo por este servicio,sino por cualquiera,asi que es buena idea extraer esa lógica(el middleware que usará cada servicio,el error a mandar si no pasa ese middleware,...)
+Usaremos una libreria compartida,creandola
+
+							VIDEO 245 3 OPTIONS FOR CODE SHARING
+
+En realidad hay mas de 3 formas de compartir código pero nosotros analizaremos únicamente tres:
+1ª: Hacer un copy-paste directo:podriamos buscar ese middleware,ese errorHandler y directamente copiar y pegar.El mayor downside sería que si algo cambia en el lugar original tendría que volver a repetir la operación.
+No vamos a considerar esta opción por motivos obvios
+
+2ª: Usar un submódulo Git:(un submodulo es cuando tengo un repositorio y quiero añadir otro repositorio dentro de éste)Asi pues podria crear un repo para el auth Srv y otro para el Ticket Srv y un tercero que combine ambosEl upside sería que tengo todo el código bajo un control de versiones,y hacer un cambio en un único lado será suficiente.El downside es que es complicado usar submódulos en Git
+
+3ª: Publicar todo como un paquete NPM: cogeremos todo el código a compartir,crearemos un nuevo proyecto y lo publicaremos al registro NPM.
+Despues cada servicio que lo quiera usar simplemente tendrá que instalarlo como dependencia.Como upside cada servicio puede incluso usar una versión diferente de ese módulo.
+También tiene downsides:cada vez que quiera hacer un cambio en ese módulo,tendré que volver a publicarlo y volver a reinstalarlo en cada servicio que lo use para actualizar esa versión.Hay scripts que pueden automatizar parte de esta tarea.Aun con esto,es la mejor opción
+
+									VIDEO 246 NPM ORGANIZATIONS 
+
+El primer punto a tener en cuenta a la hora de publicar un paquete npm es la seguridad de lo que publicamos.La librería a crear podría tener información muy sensible de como funciona mi aplicación.
+Es por ello que empezaremos por la seguridad:
+
+* Al crear un paquete npm en el registro hay tres formas de hacerlo.Puedo publicarlo en el registro público(1),puedo publicarlo en el registro público de nuevo,pero dentro de una organización(2) o puedo publicarlo de forma privada.
+
+Si lo publico al registro público lo podrá ver todo el mundo,pero si lo meto en una organización podré marcar esa organización como pública o privada.Lamentablemente marcar una org como privada es de pago y lo mismo para usar el registro privado de npm.
+
+Empecemos creando esa organización pública.Lo primero es ir a :
+> https://www.npmjs.com/  <- y registrarme.
+* Despues creo una organización pública válida.
+
+					VIDEO 247 PUBLISHING NPM MODULES
+
+ Vamos a crear nuestra libreria y publicarla.Creo un nuevo folder y lo llamo 'common' en el root del proyecto.
+>mkdir common && cd common
+>>npm init -y
+* Ahora hay que cambiar alguna cosa en el package.json.Como desarrolladores igual no prestamos mucha atención a las propiedades name o versión pero al publicar un paquete es diferente:
+{
+  "name":"@oscargmk8s/common"  <- @organizationName/libraryName
+  "version":
+
+* Para poder publicar ya este módulo primero hay que meterlo en un repositorio Git local(con local vale)
+
+>git init
+>git add .
+>git commit -m "initail commit"
+>npm login <- importante logearse antes
+>npm publish --access public 
+
+oscar@linux-aula0:/media/oscar/CRUCIALX6/CursoMicroserviciosUdemy/Projects/ticketing/common$ npm publish --access public
+npm notice 
+npm notice 📦  @oscargmk8s/common@1.0.0
+npm notice === Tarball Contents === 
+npm notice 232B package.json
+npm notice === Tarball Details === 
+npm notice name:          @oscargmk8s/common                      
+npm notice version:       1.0.0                                   
+npm notice package size:  264 B                                   
+npm notice unpacked size: 232 B                         
+npm notice shasum:        26d8abd3fdbd74d0e4960ee59353d4c3aa3852d7
+npm notice integrity:     sha512-vkUKicvxPEHaT[...]QfsJ2wrvdLESg==
+npm notice total files:   1                                       
+npm notice 
++ @oscargmk8s/common@1.0.0
+
+Puedo ver que lo ha publicado.Para instalarlo npm i @oscargmk8s/common
+
+							248 COMMON PROJECT SETUP
+
+Vamos a realizar un par de operaciones adicionales aparte de copiar y pegar.Nuestro código está en Typescript,pero no queremos que los servicios que lo implementen tengan problemas de versiones de Typescript,de echo podrian usar incluso Javascript así que vamos a transpilar el código a JS antes de publicar el módulo(pero escribir lo escribimos en Type).
+
+A efectos prácticos significa que tendremos que preparar esta aplicación para que pueda transpilar a Js.Para ello empiezo creando el ts.config:
+>tsc --init
+
+>>...eting/common$ tsc --init
+message TS6071: Successfully created a tsconfig.json file.
+* Instalo como dev-dependencies estas dos
+>npm install typescript del-cli -D
+
+Ahora hay que cambiar alguna cosa en ambos package.json y tsconfig.json:
+
+* Normalmente al hacer cada build se limpia todo antes con clean
+"scripts": {
+  "clean":"del ./build/*",
+  "build":"npm run clean && tsc"
+   
+NOTA PARA WINDOWS: This is from del-cli page: "Since del is already a builtin command on Windows, you need to use $ del-cli there."
+If you are on windows use "del-cli ./build/*" command.
+
+** del-cli did not worked for me in my windows machine. I used "rimraf" package, and it worked in one shot
+  "clean": "rimraf  build/*"
+
+* De vuelta al proyecto, en el tsconfig.json:
+1º: Descomento 'declaration' (esto hace generar un archivo de types,con lo que al instalar el módulo tendré la autoayuda)
+>"declaration": true,  /* Generates corresponding '.d.ts' file. */
+
+2º: cambio el directorio de salida(luego el js final irá a build/file.js)
+>"outDir": "./build",  /* Redirect output structure to the directory. */
+
+Pruebo a ejecutar npm build:
+>npm run build
+* Deberá transpilar,crear archivos de definición de interfaces.etc...
+
+				VIDEO 250 AN EASY PUBLISH COMMAND
+
+NOTA PREVIA:
+there is a small typo in the files field of the package.json. at around the 1:48 timestamp.Make sure you update this line:
+CHANGE
+"files": [
+  "./build/**/*"
+],
+to this:
+
+"files": [
+  "build/**/*" <- quitar el ./
+],
+
+Vamos a seguir haciendo más configuraciones
+1* En el package.json:
+"main":"index.js" /* indica que archivo importar cuando se importa todo el proyecto,es decir el archivo de entrada al proyecto,no está correcta:
+
+"main": "./build/index.js" <- cambiar a esto
+"types":"./build/index.d.js" <- esta propiedad es para Typescript,y le indica donde debe buscar por las declaraciones de interfaces y tipos.
+
+"files":[ "build/**/*" ] <- la propiedad files indica a npm que set de archivos va a ser incluida al 100% en la version publicada de este módulo.Queremos todo lo de la carpeta 'build'
+
+2* Creo el .gitignore:
+node_modules
+build 
+
+Si ahora quisiera introducir un cambio podria hacer algo como esto.IMPORTANTE EL CAMBIO DE VERSION EN CADA PUBLICACION:
+>git add .
+>git commit -m "segundo commit"
+*ahora tengo que cambiar la version,puedo ir al package.json y hacerlo manualmente,pero npm me proporciona comandos para ello:
+>npm version patch
+*npm version patch automaticamente me incrementa una minor release
+
+Aun falta hacer el build y publicarlo:
+>npm run build
+
+>...keting/common$ npm publish --access public
+npm notice 
+npm notice 📦  @oscargmk8s/common@1.0.1
+npm notice === Tarball Contents === 
+npm notice 181B build/index.js  
+npm notice 396B package.json    
+npm notice 124B build/index.d.ts
+npm notice === Tarball Details === 
+npm notice name:          @oscargmk8s/common                      
+npm notice version:       1.0.1                                   
+npm notice package size:  540 B                                   
+npm notice unpacked size: 701 B                      
+
+* IMPORTANTE: ejecutar este ciclo de git add,git commit,npm version patch,npm run build y npm publish --access public podemos automatizarlo con un pequeño script en el package.json(algo que no se haría en un proyecto real)
+
+							VIDEO 251 RELOCATING SHARED CODE
+
+Voy a mover las carpetaas 'errors' y 'middlewares' desde 'auth' a 'common'En algunos archivos requería librerias como jsonwebtoken o express asi que hay que instalarlas en este módulo 'common':
+
+>npm i express express-validator cookie-session jsonwebtoken @types/cookie-session @types/express @types/jsonwebtoken
+* express-validator tiene sus propios tipos ya incluidos
+
+Debo comprobar que no me da error ejecutar una compilación:
+>tsc <- debe de compilar sin error y saltar al siguiente prompt
+
+Ya puedo ejecutar npm run pub para que lo publique
+>npm run pub
+* recuerda que hemos exportado todo en el index.ts asi:
+export * from './errors/not-found-error';
+export * from './errors/request-validation-error';
+
+export * from './middlewares/current-user';
+export * from './middlewares/error-handler';
+
+De momento vamos a dejar el módulo common como está,pero en el futuro añadiremos código relacionado con el bus de eventos.
+
+					VIDEO 252 FIXING BROKEN AUTH SERVICE
+
+Lógicamente el auth service ha quedado roto.Para arreglarlo instalaremos nuestro módulo npm e iremos por archivo arreglando todos los imports.
+auth>npm install @oscargmk8s/common <- recuerda que lo llamé asi,aunque puedo mirar en el package.json de ese proyecto
+
+Iremos de forma metódica,de arriba a abajo arreglando los imports:
+El primer error lo tengo en current-user.ts:
+
+import { currentUser } from '../middlewares/current-user' <- ni siquiera existe ese folder ya.DEBO CAMBIARLO POR:
+
+import { currentUser } from '@oscargmk8s/common' <- recuerda que lo instalé con arroba asi que empieza por arroba pues.
+
+incluso habrá archivos en los que pueda reducir los imports:ç
+ANTES:
+import { BadRequestError } from '../errors/bad-request-error'
+import { validateRequest } from '../middlewares/validate-requests';
+DESPUES:
+import { BadRequestError, validateRequest } from '@oscargmk8s/common';
+
+				VIDEO 253 ACTUALIZANDO EL COMMON MODULE(npm update <package>)
+
+Imaginemos que queremos actualizar este modulo(algo que haremos).Por ejemplo agreguemos un simple comentario:
+// Re-export desde errors y middlewares
+export * from './errors/bad-request-error';
+
+* Hay que republicar nuestra libreria con el útilisimo script:
+>npm run pub
+* Debo quedarme con la minor release a la que llegué
++ @oscargmk8s/common@1.0.4 <- la 1.0.4
+
+Npm provee del comando update para actualizar un único paquete:
+>npm update @oscargmk8s/common
+
+Debería ver en la salida que actualizó a la 1.0.4:
+
++ @oscargmk8s/common@1.0.4
+updated 1 package and audited 603 packages in 4.405s
+
+Al ser un cambio en el package.json skaffold hará un rebuild entero
+
+Para asegurarme de que todo esta correcto podría acceder al pod:
+>k get pods
+oscar@linux-aula0:/media/oscar/CRUCIALX6/CursoMicroserviciosUdemy$ k get pods
+NAME                               READY   STATUS    RESTARTS   AGE
+auth-depl-68f5448586-944gn         1/1     Running   0          36s
+auth-mongo-depl-586dd455cf-g9dv2   1/1     Running   0          36s
+client-depl-6484f7b697-fj8xn       1/1     Running   0          36s
+
+Abro una shell en ese pod para ver los archivos:
+>k exec -ti auth-depl-68f5448586-944gn sh
+
+/app # cd node_modules/
+/app/node_modules # cd @oscargmk8s
+/app/node_modules/@oscargmk8s # ls
+common
+/app/node_modules/@oscargmk8s # cd common/
+/app/node_modules/@oscargmk8s/common # ls
+build         node_modules  package.json
+/app/node_modules/@oscargmk8s/common # cat package.json 
+
+Puedo ver que está en la 1.0.4
+{
+  "name": "@oscargmk8s/common",
+  "version": "1.0.4",
+...
+No vamos a hacer esto más veces,me fiaré de los logs de npm que ya me dijeron que subí la 1.0.4 y que se actualizó correctamente.Sin embargo,debo memorizar que puedo sacar una shell en cualquier pod cuando quiera y ver su interior.
+
+De momento es suficiente con esta sección,ya sé como crear un módulo en el registro npm.Empecemos con el ticketing service.
+
+
+
+

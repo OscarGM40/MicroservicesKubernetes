@@ -1,4 +1,5 @@
 import { Schema, model, Model, Document } from "mongoose";
+import { updateIfCurrentPlugin } from "mongoose-update-if-current";
 
 // Interfaz que designa las propiedade requeridas para crear un nuevo Ticket.Es una simple interfaz para el tipado
 interface TicketAttrs {
@@ -12,6 +13,7 @@ interface TicketDoc extends Document {
    title: string;
    price: number;
    userId: string;
+   version: number;
 }
 
 // Interfaz para el Model/Coleccion.Extiende de Model<T extends Document> donde T será la interface de arriba que heredó de Document
@@ -34,7 +36,7 @@ const ticketSchema = new Schema<TicketDoc>({
       required:true
    }
 },{
-   versionKey:false,
+   // versionKey:false,
    toJSON:{
       transform(doc,ret){
          ret.id = doc._id;
@@ -42,6 +44,10 @@ const ticketSchema = new Schema<TicketDoc>({
       }
    }
 });
+
+ticketSchema.set('versionKey', 'version');
+// @ts-ignore
+ticketSchema.plugin(updateIfCurrentPlugin);
 
 // ojo con usar arrow funcions y perder el contexto
 // vamos a crear el método build para tener autocompletado

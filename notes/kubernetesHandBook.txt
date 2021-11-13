@@ -1,0 +1,1346 @@
+				 	THE KUBERNETES HANDBOOK BY FREECODECAMP
+
+Fuente: https://www.freecodecamp.org/news/the-kubernetes-handbook
+Repo con el code: https://github.com/fhsinchy/kubernetes-handbook-projects
+Recuerda que vengo aqui por los objetos PersistentVolumes y PersistentVolumeClaims, sin embargo me leeré todo el libro ya que es interesantísimo asin
+
+Kubernetes es una plataforma de orquestación de contenedores open-source que automatiza el despliegue,la gestión,el escalado y el networking entre contenedores.
+Fue desarrollado por Google usando Go Programming Language(como Docker) y esta increible tecnología ha sido open-source desde 2014.
+Puede ser un poco difícil empezar con ella.Siguiendo esta guía atentamente seré capaz de:
+1º: obtener un sólido entendimiento de sus fundamentos
+2º: crear y manejar clusters de Kubernetes
+3º: desplegar casi cualquier aplicación a un cluster de Kubernetes
+
+Prerrequisitos: Javascript,Linux terminal y Docker(puedo leer el homólogo Docker Handbook para ello) <- hazlo
+
+Puedo encontrar todo el código de los proyectos de ejemplo en la rama 'completed' de este repo :
+>> https://github.com/fhsinchy/kubernetes-handbook-projects
+
+	TEMA 1 INTRODUCCIÓN A LA ORQUESTACIÓN DE CONTENEDORES Y KUBERNETES
+
+De acuerdo a Red Hat:
+  "La orquestación de contenedores es el proceso de automatizar el despliegue,gestión,escalado y networking entre contenedores
+  Puede ser usado en cualquier entorno donde uses contenedores y puede ayudarte a desplegar la misma aplicación entre diferentes entornos sin tener que rediseñarla".
+
+Imagina este ejemplo: has desarrollado una increíble aplicación que aconseja a la gente que debe comer de acuerdo a la hora del día.Además,has containerizado la aplicación con Docker y la has desplegado en AWS.
+
+Si la aplicación se cayerá, el usuario perderá acceso a tu servicio inmediatamente.Para solventar este problema, puedes hacer replicas de tu aplicación y hacerla altamente disponible(escalabilidad deriva en disponibilidad)
+Ahora si se cayerá una instancia,aún quedarían el resto...
+
+Imagina ahora que tu aplicación se ha vuelto salvajemente popular entre los night owls(búhos noctámbulos) y tus servidores están siendo inundados con peticiones por la noche.¿y si todas las instancias se caen debido a la sobrecarga?¿Quien va realizar el escalado?Incluso si escalas y haces 50 replicas,¿quien va a mirar por la salud de estas replicas?¿Como vas a hacer el setup del networking entre estos servicios?Y el balanceo de carga va a ser un gran problema,¿verdad?
+Kubernetes puede hacer las cosas fáciles en este tipo de situaciones.Es una plataforma de orquestación consistente en varios componentes que trabaja incansablemente para mantener tus servidores en el estado que deseas.
+Simplemente necesitas configurarle.
+Kubernetes no sólo implementará ese estado en tus servidores,también lo mantendrá.Realizará replicas si una muere,manejará el networking y almacenamiento,rollouts y rollbacks o incluso escalará hacia arriba(y hacia abajo¿?).
+
+			THEME 2	INSTALLING KUBERNETES
+
+Correr kubernetes en tu máquina local es muy diferente de hacerlo en la nube.Para ejecutar kubernetes necesitas dos programas:
+
+1º -minikube <- es un cluster de un único nodo dentro de una VM en tu computadora
+2º- kubectl  <- es la cli de Kubernetes,permite ejecutar comandos contra los clusteres de kubernetes.
+
+Además también necesitarás un hypervisor y una plataforma de containerización.Docker es la elección obvia.Los hipervisores recomendados son:
+
+- Hyper-V para Windows
+- HyperKit para Mac
+- Docker para Linux
+
+HyperV viene como una feature adicional y puede activarse desde el panel de control(buscar esto)
+HyperKit viene empaquetado con DockerDesktop para Mac
+En Linux se puede pasar la capa del hipervisor entera usando Docker.Es mucho más rápido que cualquier otro hipervisor y es la manera recomendada de ejecutar Kubernetes en Linux.
+
+Nota: puedo instalar minikube desde chocolatey en w10 o con homebrew en Mac.Kubectl viene integrado con Docker Desktop
+
+Para comprobar la instalación y el versionamiento puedo usar:
+>>minikube version <- la 1.21
+>>kubectl version <- difiere entre cliente y server en más de 1,ojo
+
+Recordemos que minikube corre un single-node de kubernetes dentro de una VM.Por ahora debo entender que minikube creará una Virtual Machine usando el hypervisor que haya elegido.Puedo setear un driver(un hypervisor) como la opción por defecto:
+>>minikube config set driver virtualbox <- 
+Puedo reemplazar el driver o VM por defecto a usar de virtualbox con hyperv,hyperkit o docker <- en realidad ya lo cambié a docker(los cambios necesitan un minikube delete y un minikube start)
+Para ver el driver actual que estoy usando la opcion está un poco oculta(minikube profile list)
+>>minikube profile list <- puede estar vacio el driver si no lo he fijado con set...
+
+Para arrancar minikube lo puedo hacer con minikube start,para pararlo con minikube stop,para pausarlo con minikube pause...
+
+			THEME 3 KUBECTL COMMAND (PODS,SERVICES;DEPLOYMENTS...) 
+
+El comando kubectl permite ejecutar un comando sobre kubernetes.Con kubectl run podName --image=imagenDocker --port=80 puedo ejecutar una imagen como un contenedor y darle el nombre a ese pod en kubernetes:
+>>kubectl run hello-kube --image=fhsinchy/hello-kube --port=80 <- recuerda que no es k run pod sino sólo k run name
+
+Deberia ver el mensaje pod 'hello-kube' created inmediatamente.El comando run ejecuta el contenedor dado dentro de un pod.
+Los pods son como una caja que encapsula un container.Para estar seguro que el pod se ha creado y está corriendo puedo ejecutar:
+>>k get pod <- parece que vale tanto pod como pods
+
+Nota: los pods por defecto son inaccesibles desde fuera del cluster.Para poder acceder a ellos,debo exponerlos usando un Service.La opción expose toma un recurso(un pod,un Deployment,un Servicio o un controlador de replicacion) y expone ese recurso como un nuevo servicio
+>>kubectl expose pod hello-kube --type=LoadBalancer --port=80 <- es buena idea darle un nombre para que no coja el de el recurso
+
+Deberia ver como se expone:
+# service /hello-kube exposed
+
+Para asegurarme que el servicio LoadBalancer se ha creado exitosamente debo ejecutar el siguiente comando:
+>>kubectl get service
+
+Ejemplos:
+# Create a service for a replicated nginx, which serves on port 80 and connects to the containers on port 8000.
+a>>kubectl expose rc nginx --port=80 --target-port=8000 <- ojo que el nginx sale por el 80 es sólo un ejemplo,en el contenedor no hay nada saliendo por el 8000 en principio
+	  
+# Create a service for a pod valid-pod, which serves on port 444 with the name "frontend"
+>>kubectl expose pod valid-pod --port=444 --name=frontend
+			    
+# Create a service for an nginx deployment, which serves on port 80 and connects to the containers on port 8000.
+>>kubectl expose deployment nginx --port=80 --target-port=8000
+
+Fijate en el uso de --name para darle un nombre a ese servicio y de --port que es el puerto donde se sirve ese servicio(el puerto exterior) y de --target-port(que es el puerto interno del contenedor al que conectar) Además hemos usado --type para darle un tipo.
+Si no se le da un nombre por defecto coge el de el pod.
+			
+					ERROR ValidatingWebhookConfiguration 
+
+Nota: debo investigar porque debo borrar el WebHook ValidatingWebhookConfiguration continuamente,y qué puedo hacer para no tener que hacerlo.El comando es:
+>>kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission <- la A es de --all-namespaces=false(sólo para el actual namespace) -o wide para que la salida sea más verbosa
+Nota:para debugear el primer paso sería un k describe resource,el segundo un kubectl logs -f resource y el tercero sería un kubectl exec -it <pod> bash (sólo puedo entrar a pods por bash) 
+
+Encontrado:    I had the same problem and found a solution from another SO thread.
+
+I had previously installed nginx-ingress using the manifests. I deleted the namespace it created, and the clusterrole and clusterrolebinding as noted in the documentation, but that does not remove the ValidatingWebhookConfiguration that is installed in the manifests, but NOT when using helm by default. As Arghya noted above, it can be enabled using a helm parameter.
+
+Once I deleted the ValidatingWebhookConfiguration, my helm installation went flawlessly.
+
+>>kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission
+
+Parece que se queda ese recurso(que tipo es¿?)
+Another dev:
+You can check if there is a validation webhook and a service. If they don't exist double check the deployment and add these.
+
+>>kubectl get -A ValidatingWebhookConfiguration
+NAME                      CREATED AT
+ingress-nginx-admission   2020-04-22T15:01:33Z
+
+>>kubectl get svc -n ingress-nginx
+NAME                                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             NodePort    10.96.212.217   <none>        80:32268/TCP,443:32683/TCP   2m34s
+ingress-nginx-controller-admission   ClusterIP   10.96.151.42    <none>        443/TCP                      2m34s
+
+			NOTAS SOBRE UPGRADEAR LA API INGRESS
+
+Si upgradeo de extensions/v1beta1 o de networking.k8s.io/v1beta1 a networking.k8s.io/v1 lo cual tendré que hacer pues las primeras son betas,algunas propiedades han cambiado(para la 1.22 hay que hacer el cambio):
+
+`Ingress` and `IngressClass` resources have graduated to `networking.k8s.io/v1`. Ingress and IngressClass types in the `extensions/v1beta1` and `networking.k8s.io/v1beta1` API versions are deprecated and will no longer be served in 1.22+. Persisted objects can be accessed via the `networking.k8s.io/v1` API. Notable changes in v1 Ingress objects (v1beta1 field names are unchanged):
+* `spec.backend` -> `spec.defaultBackend`
+* `serviceName` -> `service.name`
+* `servicePort` -> `service.port.name` (for string values)
+* `servicePort` -> `service.port.number` (for numeric values)
+* `pathType` no longer has a default value in v1; "Exact", "Prefix", or "ImplementationSpecific" must be specified
+Other Ingress API updates:
+* backends can now be resource or service backends
+* `path` is no longer required to be a valid regular expression
+Ejemplo:
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minimal-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /testpath
+        pathType: Prefix
+        backend:
+          service:
+            name: test
+            port:
+              number: 80
+
+			PATH TYPES <-INVESTIGAR MÁS
+
+The new concept of a path type allows you to specify how a path should be matched. There are three supported types:
+
+ImplementationSpecific (default): With this path type, matching is up to the controller implementing the IngressClass. Implementations can treat this as a separate pathType or treat it identically to the Prefix or Exact path types.
+Exact: Matches the URL path exactly and with case sensitivity.
+Prefix: Matches based on a URL path prefix split by /. Matching is case sensitive and done on a path element by element basis.
+
+Volviendo al handbook,una vez que tenga un pod expuesto mediante un Servicio,ya puedo acceder a él.Para ello ejecuto:
+>>minikube service hello-kube-srv <- el nombre del servicio
+Deberia abrirse el navegador y ver la aplicación que ha subido el autor del libro...
+Nota: minikube service <serviceName> lanzará un navegador web.
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog$ minikube service hello-kube-srv
+|-----------|----------------|-------------|---------------------------|
+| NAMESPACE |      NAME      | TARGET PORT |            URL            |
+|-----------|----------------|-------------|---------------------------|
+| default   | hello-kube-srv |          80 | http://192.168.49.2:31466 |
+|-----------|----------------|-------------|---------------------------|
+🎉  Opening service default/hello-kube-srv in default browser...
+
+Puedo ver que lo abre en esa URL,con lo que minikube service serviceName abrirá recursos en el browser,lo cual es muy interesante,asinto.
+
+
+				   NOTAS ADICIONALES SOBRE DEPLOYMENTS,LOAD BALANCER Y PORT FORWARDING
+
+Nota: un Load Balancer no tiene sentido fuera de un cloud Provider, un ClusterIP es la conexión más básica,solo para que se puedan ver los pods dentro del cluster.Por ende,un NodePort enlaza una IP local al servicio(fijate como la app de posts llevaba un NodePort,porque está en local,mientras que la de GC lleva un LoadBalancer).
+
+Podria haber echo todo esto con un deployment directamente,lo cual también es interesante,porque restarteará el pod:
+
+>>kubectl create deployment hello-minikube --image=k8s.gcr.io/echoserver:1.4 <- recuerda que hay que exponer el recurso
+Para ver los deployments puedo usar k get deploy:
+>>k get deploy -A -o wide <- recuerda que para borrar hay que indicar el tipo del recurso
+Nota: fijate como también va a crear un pod pero le va a agregar un hash ya que desde ahora el deployment va a vigilar que siempre esté up:
+>>k get po
+hello-minikube-6ddfcc9757-l4km2   1/1     Running   0          2m58s <- el hash iŕa cambiando segun el lifecycle
+
+Creo un Service para el deploy.Lo haremos de tipo NodePort de momento:
+>>kubectl expose deployment hello-minikube --type=NodePort --port=8080 <- fijate que accederé por 192.168.49.2:8080
+Nota:investigar las diferencias entre NodePort y LoadBalancer
+
+Ahora tengo dos opciones o abrirlo ya en el navegador con minikube service o hacer un port forwarding:
+1ª: >>minikube service hello-minikube <- lo abrirá en localhost:8000
+Puedo redireccionar si lo necesito,sin embargo es kubectl quien redirecciona los puertos,no minikube:
+2ª: >>kubectl port-forward service/hello-minikube 7800:8000 <- como es kubectl cambia un poco la sintaxis
+
+FORMA 2: USANDO UN LOAD BALANCER Y UN TUNEL(minikube tunnel)
+>>k create deployment balanced --image=k8s.gcr.io/imagen <- balanced es el nombre simplemente
+>>k expose deployment balanced --type=LoadBalancer --port=8080
+Ahora en otra ventana debo arrancar el túnel para crear una IP rutable desde el deployment 'balanced'
+>>minikube tunnel
+Para encontrar la IP routable,debo ejecutar este comando y examinar la columna EXTERNAL_IP:
+>>kubectl get services balanced
+Mi despliegue estará disponible en <EXTERNAL_IP>:8080 me dió http://10.97.19.18/ <- es local¿?
+
+Tips: puedo pausar minikube sin impactar en las aplicaciones desplegadas:
+>>minikube pause
+Para parar el cluster:
+>>minikube stop
+Puedo incrementar la memoria por defecto:
+>>minikube config set memory 16384 
+Puedo observar el catálogo de servicios Kubernetes instalados:
+>>minikube addons list <- recuerda que instalaba ingress-nginx a través de los addons también
+Arrancar un segundo cluster con una versión anterior de Kube:
+>>minikube start -p aged --kubernetes-version=v1.16.1
+Borrar todos los clusters minikube locales
+>>minikube delete --all
+
+				THEME 4 KUBERNETES ARQUITECTURE
+
+En el mundo de kubernetes, un nodo puede ser tanto una máquina física como una máquina virtual con un rol adjudicado.Una colección de estas máquinas o servidores usando una red compartida para comunicarse se denomina cluster.Ver imagen 01
+Ahora mismo,minikube es un único nodo formando el cluster Kubernetes.Asi que en vez de tener múltiples servidores como en la imagen, minikube solo tiene uno que actua tanto como de servidor y de nodo.Ver imagen 02
+
+Cada servidor en un cluster de kubernetes desempeña un rol.Hay dos roles posibles:
+ 1º: control-plane : Realiza la mayoría de las decisiones necesarias y actúa como cerebro para el cluster al completo.Puedo ser un único servidor o un grupo de servidores en proyectos muy grandes(el master)
+ 2º: node : Responsable de ejecutar las cargas de trabajo(los workers).Estos servidores normalmente están micro-gestionados por el control-plane y llevan a cabo varias tareas siguiendo las instrucciones que se les dé.
+
+ Cada servidor en el cluster tendrá un set de componentes.El número y tipo de estos componentes varía dependiendo del rol que el servidor/máquina tenga en tu cluster.Esto significa que los nodos no tienen todos los componentes que tiene el control-plane.En subsiguientes secciones veré más detalladamente los componentes individuales que conforman un cluster de kubernetes.
+
+			 CONTROL PLANE COMPONENTS(master components)
+
+El control plane en un cluster kubernetes consiste de CINCO componentes:
+1º: kube-api-server : éste actúa como la entrada al kubernetes control plane,responsable de validar y procesar las peticiones enviadas usando librerias cliente como el programa 'kubectl'.Valida y procesa las peticiones
+
+2º: etcd: es un almacén de claves-valor distribuido que actua como single source of truth en relación a mi cluster.Alberga datos de configuración e información sobre el estado del cluster.'etcd' es un proyecto open-source que es desarrollado por folks detrás de Red Hat.El código fuente está en GitHub.En resumen es una base de datos 
+
+3º: kube-controller-manager: los controladores en kubernetes son responsables de controlar el estado del cluster.Cuando haces saber a kubernetes qué es lo que quieres en tu cluster,los controladores se asegurán de ello.El kube-controller-manager son todos los procesos controladores agrupados en un único proceso(el proceso padre o raíz de todos los controladores)
+
+4º: kube-scheduler: asignar tareas a un nodo considerando sus recursos disponibles asi como los requerimientos de esas tareas se le conoce como 'scheduling'.El componente kube-scheduler realiza las tareas de 'scheduling' en kubernetes asegurandose que ninguno de los servidores se sobrecarga.
+
+5º: cloud-controller-manager: en un entorno cloud real,este componente te permite conectar tu cluster con tu cloud provider(GKE/EKS) API.De esta forma,los componentes que interactuan con esa plataforma en la nube permanecen separados y aislados de componentes que simplemente actuan en tu cluster.En un entorno local como minikube,este componente simplemente no existe.
+
+Nota: puedo ver estos componentes con kubectl get pod -A (para que muestre todos)
+>>kubectl get po -A <- le puedo quitar la d también.
+
+					NODE COMPONENTS
+
+Comparados con el control plane,los nodos tienen un número menor de componentes.Estos son:
+
+1º:kubelet: este servicio actúa como puerta de entrada entre el control plane o master y cada uno de los nodos en un cluster(no los pods,sino el nodo entero).Todas las instrucciones del control plane hacia los nodos pasan a través de este servicio.También interactúa con el almacén etcd para mantener la información del estado actualizada
+
+2º:kube-proxy: este pequeño servicio solo corre en cada node-server y mantiene reglas de networking sobre ellos.Cualquier petición de network que alcanza un servicio dentro de tu cluster,pasa a través de este servicio
+
+3º: Container Runtime: kubernetes es una herramienta de orquestación de contenedores luego corre aplicaciones en contenedores.Esto significa que cada nodo necesita tener un entorno como Docker o rkt o cri-o
+Resumen:cada nodo tiene kubelet,un kube-proxy y un Container Runtime
+
+					OBJETOS KUBERNETES
+
+De acuerdo a la documentación:
+  "Los objetos son entidades persistentes en el sistema kubernetes.Kubernetes usa estas entidades para representar el estado de tu cluster.Más especificamente,pueden describir qué aplicaciones containerizadas están ejecutandose,los recursos disponibles y consumidos,y las politicas sobre su comportamiento"
+
+Cuando creas un objeto Kubernetes,efectivamente estás diciendo a kubernetes que quieres que ese objeto exista sin importar nada más y por ello el sistema Kubernetes intentará trabajar constantemente para mantener ese objeto activo(running)
+
+   1- PODS
+
+"Los pods son la unidad más pequeña desplegable de computación que puedes crear y manejar en kubernetes"
+
+Un pod normalmente encapsula uno o más contenedores que están intimamente relacionados compartiendo el ciclo de vida y los recursos consumibles(lógico que estén unidos,si parara el pod pararé los contenedores de ese pod,comparten el mismo ciclo de vida)
+
+Aunque un pod puede albergar más de un contenedor,estos contenedores estarían tan relacionados entre sí que pueden ser tratados como una única aplicación.
+Usualmente no debo interactuar con un pod directamente.En vez de ello,debería trabajar con objetos de más alto nivel ya que me proveen mayor manejabilidad.
+
+  2- SERVICES
+
+"Un servicio en Kubernetes es una manera abstracta de exponer una aplicación corriendo en un conjunto de pods como un servicio de network"
+
+Los pods en kubernetes son efímeros por naturaleza.Son creados y despues de cierto tiempo,cuando son destruidos,no son reciclados.
+En vez de ello nuevos pods idénticos toman el lugar de los antigüos.Algunos objetos Kubernetes de alto nivel son incluso capaces de crear y destruir pods dinámicamente
+
+Una nueva dirección IP es asignada a cada pod en el momento de su creación.Pero como estos objetos de alto nivel pueden crear o destruirlos,el número de pods diferirá de un momento concreto al siguiente momento.
+Esto conduce a un problema:si un set de pods en tu cluster dependiera de otro(lo cual va a suceder),¿como encuentran estos pods las IPs de los otros pods de los que dependen?
+
+"un Service es una abstración que define un set lógico de Pods y una politíca por la cual acceder a ellos"
+Esto esencialmente significa que un Service agrupa un conjunto de pods que realizan la misma función y los presenta como una única Entidad
+
+De esta forma la confusión de seguir la pista a múltiples pods desaparece ya que ahora un Śervice actua como una especie de comunicador para todos ellos.
+En el ejemplo anterior creamos un Service de tipo LoadBalancer,el cual permite que peticiones desde afuera del cluster conecten con los pods que haya activos dentro del cluster.Ver imagen
+Cada vez que necesite dar acesso a uno o más pods a otra aplicación o a algo afuera del cluster,tendré que crear un servicio.Por ejemplo cuando tenga un set de pods que corren servidores web que deberán ser accesibles desde internet,un objeto Service me proveerá de la necesaria abstración.
+
+		NodePort ACCESS Service
+
+Minikube soporta tanto NodePort como LoadBalancer.
+Un service NodePort es la forma más básica de obtener tráfico externo directo a mi servicio.NodePort, como el nombre implica, abre un puerto especifico,y todo el tráfico que es dirigido a ese puerto es forwardeado al servicio.Con minikube service --url <service-name> puedo saber el socket entero del servicio:
+oscar@acer-linux:/media/oscar/ARCANITE/CursoMicroserviciosUdemy$ minikube service --url balanced <- solo para NodePort
+http://192.168.49.2:30561
+Por defecto minikube solo expone los puertos del 30000 al 32767.Si no me satisface puedo ajustar el rango usando:
+>>minikube start --extra-config=apiserver.service-node-port-range=1-65535
+
+	 LoadBalancer ACCESS Service
+
+Un LoadBalancer service es la forma estandár de exponer un servicio a internet.Con este método,cada servicio obtiene su propia IP(puede que por eso se creen adaptadores de red!)
+
+Los servicios de tipo LoadBalancer pueden ser expuesto usando el comando minikube tunnel.minikube tunnel corre como un proceso,creando una ruta en el host del servicio CIDR del cluster(en la máquina que hostea el cluster) usando la IP del cluster como gateway(puerta de entrada)El comando tunnel expone la IP externa directamente a cualquier programa que esté corriendo en el sistema operativo anfitrión.
+
+Ejemplo:
+
+1-Create a kubernetes deployment
+>>kubectl create deployment hello-minikube1 --image=k8s.gcr.io/echoserver:1.4
+2-Create a kubernetes service type LoadBalancer
+>>kubectl expose deployment hello-minikube1 --type=LoadBalancer --port=8080
+3-Check external IP
+>>kubectl get svc
+NAME              TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)          AGE
+hello-minikube1   LoadBalancer   10.96.184.178   10.96.184.178   8080:30791/TCP   40s
+Fijate que sin minikube tunnel kubernetes mostraría la IP externa como "pending".
+Ya puedo abrirlo en el navegador:
+http://REPLACE-WITH-EXTERNAL_IP:8080
+
+Nota: si minikube tunnel termina abruptamente puede dejar rutas huerfanás en el sistema.Si sucede esto,el ~/.minikube/tunnels.json contendrá una entrada para ese túnel.Para remover rutas huerfanas:
+>>minikube tunnel --cleanup
+Investigar más sobre esto
+
+  3- DEPLOYMENTS
+
+Nota: podria haber echo todo esto con un deployment directamente,lo cual también es interesante,ya que va a persistir el pod:
+
+>>kubectl create deployment hello-minikube --image=k8s.gcr.io/echoserver:1.4 <- recuerda que hay que exponer el recurso con un Service
+
+>>kubectl expose deployment hello-minikube --type=NodePort --port=8080
+
+Ahora tengo dos opciones o abrirlo ya en el navegador con minikube service o hacer un port forwarding:
+1ª: >>minikube service hello-minikube <- lo abrirá en localhost:8000
+
+Puedo redireccionar si lo necesito,sin embargo es kubectl quien redirecciona los puertos,no minikube:
+2ª: >>kubectl port-forward service/hello-minikube 7999:8000 <- como es kubectl cambia un poco la sintaxis.Ahora estará en localhost:7999
+Investigar kubectl proxy
+
+			KUBERNETES API AND FULL REVIEW UNTIL NOW
+
+"Para trabajar con objetos Kubernetes -ya sea crear,modificar, o borrarlos- necesitaré usar la API kubernetes.Cuando uso el comando cli 'kubectl',la CLI hará las necesarias llamadas a la API kubernetes por mí"
+
+El primer comando que ejecuté fue este.Analicemoslo:
+>>kubectl run hello-kube --image=fhsinchy/hello-kube --port=80
+
+El comando run es responsable de crear un nuevo pod que correrá la imagen dada.Una vez ejecutado el comando,el siguiente set de eventos ocurre en el cluster de kubernetes:
+1- el componente kube-api-server del master recibe la petición,la valida y la procesa
+2- el kube-api-server se comunica con el kubelet component del nodo y provee las instruciones necesarias para crear el pod
+3- el kubelet comienza su trabajo construyendo el pod y también mantiene la información actualizada en el etcd store del master.
+La sintaxis general para el comando 'run' es la siguiente:
+kubectl run <pod name> --image=<image name> --port=<port to expose>
+Nota:recuerda que minikube es tanto master como nodo(confirmar) 
+
+Puedo correr cualquier imagen válida dentro de un pod.La imagen fhsinchy/hello-kube contiene una app Javascript muy simple que corre en el puerto 80 en el contenedor.La flag --port=80 permite al pod exponer el puerto 80 desde dentro del contenedo fhsinchy/hello-kube contiene una app Javascript muy simple que corre en el puerto 80 en el contenedor.La flag --port=80 permite al pod exponer el puerto 80 desde dentro del contenedor 
+
+Este nuevo pod corre dentro del cluster minikube local y es inaccesible desde fuera por naturaleza.Para exponer el pod y hacerlo accesible,el segundo comando que usé fue:
+>>kubectl expose pod hello-kube --type=LoadBalancer --port=80
+
+El comando expose es responsable de crear un objeto Service de tipo LoadBalancer que permite al usuario acceder a la aplicación corriendo dentro del pod.Igual que el comando run,el comando expose siguió los mismos pasos(kube-api-server => kubelet => etcd).La única diferencia es que kubelet creó un Service en vez de un Pod.
+
+La sintaxis general para el comando 'expose' es:
+kubectl expose <resource kind to expose> <resource name> --type=<type of service to create> --port=<port to expose>
+
+El --type indica el tipo de servicio a crear.Hay 4 tipos dependiendo de si el networking es interno o externo.
+Por último el --port indica el número de puerto que quiero exponer desde el contenedor
+
+Una vez el servicio se ha creado,la última pieza del puzzle fue acceder a la aplicación dentro del pod.Para hacer esto ejecuté el comando minikube service <nombreServicio>
+>>minikube service hello-kube
+
+Nota:puedo imprimir por consola el yaml de un pod:
+>>kubectl get po my-test-pod -o yaml <- outputea el yaml
+
+A diferencia de los anteriores este comando no fue por kube-api-server.En vez de eso se comunica con el cluster local usando minikube.El comando 'service' para minikube devuelve una URL completa para el servicio pasado como argumento.
+Al crear el pod con --port=80 instruí a kubernetes para que expusiera el puerto 80 desde dentro del container,pero era inaccesible desde afuera del cluster.Entonces creé el LoadBalancer con la opción --port=80,aquí si mapee ese puerto 80 del contenedor a un puerto arbitrario en el sitema local haciendolo accesible desde fuera del clúster.
+El estado final se puede ver en la imagen
+
+			DESAHACIENDOME DE RECURSOS KUBERNETES
+
+Ahora que sé como crear recursos kubernetes como pods o services,necesito aprender a deshacerme de ellos.La única forma de deshacerse de un recurso kubernetes es eliminandolo.
+Esto se puede hacer usando el comando delete para kubectl.La sintaxis genérica es la siguiente(tipo-nombre):
+>>kubectl delete <resource type> < resource name>
+>>kubectl delete pod hello-kube
+y si es un servicio simplemente lo indico de la misma manera:
+>>kubectl delete service hello-kube-service
+
+Si estoy en modo destructivo puedo borrar todos los objetos de un tipo con la flag --all:
+>>kubectl delete pod --all <- ojo con esto
+Así,podría borrar fácilmente todos los pods y services:
+>>k delete pod --all
+>>k delete service --all
+
+		APROXIMACIÓN DECLARATIVA DE DEPLOYMENTS
+
+Para ser honestos,los ejemplos por cli mostrados hasta ahora no son la forma ideal de realizar despliegues en kubernetes.
+
+La forma vista es un 'acercamiento imperativo' lo que significa que tengo que ejecutar cada comando uno detrás de otro manualmente.Tomar un acercamiento imperativo desafía la entera naturaleza de kubernetes.
+
+El acercamiento declarativo es el ideal.En él,como desarrollador, deja a Kubernetes saber el estado que deseas para tus servidores y Kubernetes encontrará la manera de implementarlo.
+
+En esta sección desplegaré la misma aplicación pero desde este lado declarativo.Lo primero será crear un directorio.Este directorio contendrá el código para la aplicación(es una app de Vue) asi como el Dockerfile para buildear la imagen
+
+El código de la app realmente no me interesa,sólo me interesa que Docker sepa hacer el build a través del Dockerfile.Si me fijo en ese archivo veré el siguiente código:
+
+FROM node as builder
+
+WORKDIR /usr/app
+
+COPY ./package.json ./
+RUN npm install
+COPY . . 
+RUN npm run build
+
+EXPOSE 80
+
+FROM nginx 
+COPY --from=builder /usr/app/dist /usr/share/nginx/html
+
+Como puedo observar, es un proceso multi-staged build:
+1º: la primera sección usa node como imagen,la da un alias,compila el Javascript de la aplicación a un estático de producción
+2º:la segunda seccion copia los archivos estáticos del contenedor al segundo contenedor(fijate que copia --from=builder,o sea de la app Vue el estático que estará en /usr/app/dist a que lo sirva el nginx)
+Ahora para desplegar esta app en kubernetes,tendré que encontrar una forma de correr esta imagen como un container y hacer el puerto 80 accesible desde el exterior
+Nota: podria ya servirlo como un contenedor añadiendo:
+
+FROM nginx
+COPY --from=reactapp /usr/app/build /usr/share/nginx/html
+EXPOSE 80
+#necesitamos que el demonio esté en off
+CMD [ "nginx","-g","daemon off;" ]
+Algo falló.
+
+
+			ESCRIBIENDO MI PRIMER SET DE CONFIGURACIONES
+			
+En una aproximación declarativa,en vez de emitir comandos individualmente en tu terminal,eswcribiré la configuración necesrio en un archivo YAML y se lo pasaré a kubernetes.
+En el directorio del proyecto hello-kube creo otro directorio llamado k8s.Este nombre es un estandar.
+No hace falta llamarle así,de echo ni siquiera hay que tenerlo en el proyecto.Estos archivos de configuración pueden vivir en cualquier lugar en tu computadora,ya que no tienen relación con el código del proyecto.
+
+Ahora dentro de ese directorio k8s crea un nuevo archivo llamado hello-kube-pod.yaml.Me adelantaré y escribiré el código para el archivo primero y despues iré linea a linea explicandolo:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hello-kube-pod 
+  labels:
+    component: web
+spec:
+  containers:
+    - name: hello-kube
+	  image: fhsinchy/hello-kube
+	  ports:
+	    - containerPort: 80
+		
+Todo archivo de configuración Kubernetes válido tiene cuatro campos requeridos.Son los siguientes:
+
+1º: apiVersion: especifica que version de la API Kubernetes estoy usando para crear este objeto.Este valor puede cambiar dependiendo del tipo de objeto que estoy creando.Para crear un Pod la versión requerida es v1
+
+2º: kind: que tipo de objeto quiero crear.Objetos en Kubernetes pueden ser de muchos tipos.De momento me vale con saber que es de tipo Pod.
+
+3º: metadata: data que ayuda a identificar el objeto unívocamente.Bajo este campo puedo tener información como name,labels,annotation etc.El string metadata.name será mostrado en el terminal con kubectl (básicamente es el nombre del objeto desde el momento que lo declare).El par de clave-valor bajo el campo metadata.labels  no tiene porque ser components: web.Puede ser cualquier par de claves-valor,como app: hello-kube.Este valor será usado pronto como el selector cuando creemos el Service de tipo LoadBalancer en nada.
+
+4º: spec: contiene el estado que desee que tenga para el objeto.El subcampo spec.containers contiene información sobre los contenedores que correrán dentro de este Pod.El valor spec.containers.name es el nombre que que el container runtime dentro del nodo le asignará.
+El specs.containers.image es la imagen a usar para crear ese contenedor.
+Y el campo specs.containers.ports alberga configuración sobre los puertos. containerPort: 80 indica que quiero exponer el puerto 80 del contenedor.
+Aún faltará exponer el Service(importante)
+Para alimentar a kubernetes con este archivo de configuración se usa el comando apply.La sintaxis genérica para el comando es la siguiente:
+
+>>kubectl apply -f hello-kube-pod.yaml
+Ahora me aseguro que el Pod esta corriendo:
+>>k get po <- deberé verle Running
+
+Ahora que el Pod está Up,es tiempo de escribir la configuración para el Service de tipo Load Balancer.
+Creo otro archivo dentro del directorio anterior k8s llamado hello-kube-load-balancer-service.yaml con el siguiente código:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-kube-load-balancer-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    component: web
+	
+Igual que el anterior configuration file, apiVersion, kind y metadata cumplen el mismo propósito.Puedo observar que no está el campo labels dentro de metadata.Esto es porque labels es para etiquetar los otros objetos y que sea Service quien los encuentre a través de esa label.
+Dentro del campo 'spec' puedo ver un nuevo set de valores.A diferencia del Pod,un Service tiene 4 tipos.Son ClusterIP,NodePort,LoadBalancer y ExternalName.
+En este ejemplo usaré un LoadBalancer,que es la forma estandár de exponer un servicio afuera del cluster.Este servicio me dará una IP que puedo usar para conectarme a las aplicaciones que están corriendo en mi cluster.
+Fijate en la imagen como el Load Balancer se conecta con todos los pods realmente.
+Un Load Balancer requiere de dos puertos con sus valores para trabajar apropiadamente.Bajo el campo 'ports' el valor port es accesible para el propio pod y su valor puede ser cualquiera que yo quiera.
+El valor para targetPort es para el puerto dentro del contenedor y tiene que hacer match con el puerto que quiero exponer desde dentro del contenedor(targetPort es el puerto hacia el que apunto en el contenedor,oviamente tengo que exponerlo anteriormente)
+Fijate que en este ejemplo el targetPort es 80 y que ya exponí este puerto en el Dockerfile.No confundas el port que es el puerto del Service,podría sacar todo esto por otro puerto.
+El campo 'selector' se usa para identificar los objetos que serán conectados a este servicio.El par de clave-valor component:web tiene que hacer match con el otro par de clave-valor bajo el campo labels en el archivo de configuración del Pod.	
+De nuevo uso kubectl apply -f configFile.yaml <- investigar como llamar al archivo con una ruta relativa
+Podría alimentar los dos archivos a la vez con:
+>>kubectl apply -f k8s <- parece que lo hace recursivo.Investigar más sobre esto.Obviamente tendré que asegurarme que estoy en la carpeta padre.
+Si estoy dentro de esa carpet k8s también puedo usar un punto(.) para referirme al directorio actual.Con aplicaciones de configuración en masa puedo ser una buena idea deshacerse de recursos creados previamente.De esta forma la posibilidad de conflictos es mucho menor.
+La aproximación declarativa es la ideal al trabajar con kubernetes.Excepto por algunos casos especiales,que veré al final del artículo.
+
+				THE KUBERNETES DASHBOARD
+			
+En una sección previa,usé el comando delete para deshacerme de un objeto Kubernetes.
+En esta sección,sin embargo,el autor asinto pensó que introducir el dashboard sería una buena idea.El Kubernetes Dashboard es una UI gráfica que puedo usar para manejar cargas de trabajo,servicios y más.
+Para lanzar el Kubernetes Dashboard,ejecuta el siguiente comando desde terminal(sólo si tengo minikube)
+>>minikube dashboard
+La interfaz es muy amigable.Aunque es completamente posible crear,manejar y borrar objetos desde esta UI,seguiremos con la CLI.
+
+		TRABAJANDO CON APLICACIONES MULTI-CONTAINER
+
+Hasta ahora he trabajado con aplicaciones que corren en un único contenedor.En esta sección,estaré trabajando con una aplicación consistente en dos containers.También me familizaré con los objetos Deployment,ClusterIP,PersistentVolume y PersistentVolumeClaims.
+
+La app es una simple app express de notas con total funcionalidad CRUD.Usará PostgreSQL como database,asi que no sólo desplegaré la aplicación sino que también crearé networking entre la app y la base de datos.
+El código para la aplicación está en el directorio notes-api del repo del autor del artículo.
+
+Ejemplo del Dockerfile.dev:
+FROM node:lts
+
+WORKDIR /usr/app
+
+COPY ./package.json .
+RUN npm install
+
+COPY . .
+
+CMD [ "npm", "run", "dev" ]
+
+Dentro del directorio api está el código de la app y el directorio postgres contiene un Dockerfile para crear una imagen custom postgres.El docker-compose.yaml contiene la configuración necesaria para correr la coposición de ambas aplicaciones.
+
+Puedo ver como en la carpeta postgres tengo una subcarpeta aparte del Dockerfile,en el cual se copia toda esa subcarpeta:
+
+En la subcarpeta llamada docker-entrypoint-initdb
+CREATE TABLE IF NOT EXISTS notes (
+    id serial PRIMARY KEY,
+	    title varchar(255) NOT NULL,
+		    content text NOT NULL
+			);
+
+En el Dockerfile copio todo lo de ./docker-entrypoint... y expongo el puerto(y las claves¿?)
+FROM postgres:12
+
+EXPOSE 5432
+
+COPY ./docker-entrypoint-initdb.d /docker-entrypoint-initdb.d
+Fijate que al hacer la build de esta imagen tendré la base de datos además de una carpeta con el DDL para crear la base de datos!
+
+Todo esto coge sentido al ver el docker-compose.yaml.Fijate en el uso de la label:
+
+version: "3.8"
+
+services: 
+  db:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile.dev
+	volumes:
+	  - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: 63eaQB9wtLqmNBpg
+      POSTGRES_DB: notesdb
+  api:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile.dev
+    ports: 
+      - 3000:3000
+    volumes: 
+      - /home/node/app/node_modules
+      - ./api:/home/node/app
+    environment: 
+      DB_CONNECTION: pg
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_DATABASE: notesdb
+      DB_PASSWORD: 63eaQB9wtLqmNBpg
+volumes:
+  db-data:
+    name: notes-db-deb-data
+Debería tomar como ejemplo esta forma de proceder,alimentandose el docker-compose de las imagenes creadas mediante los Dockerfile(pudiendo incluso elegir Dockerfile.dev)	  
+Hacer un ejemplo de una app que haga un build de react y otro con una base de datos.Desplegarlo todo.
+Mirando a la definición del servicio 'api' en el compose,puedo ver que la aplicación corre en el puerto 3000 en el contenedor.También requiere un puñado de variables de entorno para funcionar adecuadamente.
+Los volumenes pueden ser ignorados ya que se crearon para un ambiente Docker,asi que sólo hay que traer estos dos sets de información en cuanto al servicio api se refiere:
+-mapeo de puertos
+-variables de entorno
+El servicio 'db' es incluso más simple.Puedo incluso pasarle la imagen oficial de postgres en vez de la que estamos pasando customizada.
+Sin embargo lo haremos asi porque esta imagen viene con la tabla notes pre-creada.
+Si miro en postgres/docker-entrypoint-initdb.d veré el archivo notes.sql pero no sé porque se crea la base de datos sola.
+
+				DEPLOYMENT PLAN
+
+A diferencia de el proyecto anterior,este proyecto va a ser algo más complicado.
+No voy a crear una instancia,sino TRES instancias de la API notes.Estas tres instancias(pods) van a ser expuestas afuera del cluster usando un Service LoadBalancer(para las tres entiendo)Ver imagen
+Fijate en la imagen que la base de datos es un único container al que accederán estos tres pods.
+Aparte de estas tres instancias,habrá otra instancia del gestor de base de datos PostgreSQL.Estas tres instancias de la API se comunicarán con la base de datos usando un Service de tipo ClusterIP(fijate que siempre van a necesitar un Servicio de este tipo,es decir,de conexión entre pods)
+Un Service ClusterIP es otro tipo de Kubernetes Service que expone una aplicación dentro del clúster(pero no hacia afuera del mismo)Esto significa que ningun tráfico exterior puede alcanzar la aplicación usando un ClusterIP Service.Ver imagen
+En este proyecto la base de datos debe ser accedida y accesible por la API notes únicamente asi que exponer la database sólo dentro del cluster es una elección ideal
+Ya hemos mencionado que no debería de crear los Pods directamente asi que usaremos un Deployment en vez de un Pod
+
+		REPLICATION CONTROLLERS,REPLICA SETS AND DEPLOYMENTS
+
+De acuerdo a la doc de Kubernetes:
+"En Kubernetes,los controladores son control loops que vigilan el estado de tu cluster.Cada controlador intenta mover el estado del cluster actual más cerca del estado deseado.Un control loop es un bucle infinito que regula el estado de un sistema(un controlador en bucle)"
+
+	REPLICATION CONTROLLER
+
+Un ReplicationController,como el nombre sugiere me permite crear múltiples replicas fácilmente.Una vez que el número deseado de replicas se ha alcanzado,el controlador se asegurará de mantener el estado en esta manera.
+Si despues de un tiempo decido decrementar el número de replicas,el ReplicationController tomará acciones inmediatamente y se deshará de los Pos extra.
+De la misma manera si el número se vuelve menor(por ejemplo por un crasheo) el ReplicationController creará nuevas replicas también.
+Aún asi el ReplicationController no es la forma adecuada de crear replicas hoy en dia.Una nueva API llamada ReplicaSet ha tomado su lugar
+
+Aparte del hecho de que un ReplicaSet me provee de un mayor rango de opciones de selección,ambos ReplicaSet y ReplicationController son más o menos lo mismo.
+
+Si bien tener un mayor rango de opciones es bueno,lo que es aún mejor es tener más flexibilidad en términos de rolling out(desplegado) y rolling back(retroceso).Aqui es donde entra otra API Kubernetes llamada Deployment.
+
+Un Deployment es como la extensión de la ya buena ReplicaSet API.El Deployment no solo me permite crear replicas en nada de tiempo , si no que me permite tambíén liberar actualizaciones o retroceder a una funcionalidad previa con sólo uno o dos comandos kubectl.
+
+El ReplicationController era el método original de replicación,fue sustituido por la API ReplicaSet y ya hoy en dia se usan los Deployments.
+En este proyecto usaremos Deployment para mantener las instancias de la aplicación.
+
+		CREANDO MI PRIMER DEPLOYMENT
+
+Empecemos escribiendo el archivo de configuración para el Deployment de la API notes.Creo un directorio k8s en la raiz de proyecto.
+Dentro de el folder creo el file api-deployment.yaml:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      component: api
+  template:
+    metadata:
+	  labels:
+	    component: api
+	spec:
+	  containers:
+	    - name: api
+		  image: fhsinchy/notes-api
+		  ports:
+		    - containerPort: 3000
+
+En este archivo los campos apiVersion,kind,metadata y spec sirven al mismo propósito que en proyecto previo.Los cambios más notables respecto al anterior proyecto son:
+  - Para crear un Pod la apiVersion requerida era v1.Pero para crear un Deployment la version es apps/v1.Las versiones de las API de Kubernetes pueden ser un poco confusas,pero cuanto más trabaje con Kubi mejor las entenderé.
+  - El tipo es Deployment lo cual es bastante explicatorio per sé.
+  - spec.replicas define el número de replicas running. Setear este valor a 3 significa que informo a Kubernetes de quiero 3 replicas de mi aplicación corriendo en todo momento.
+  - spec.selector es donde informo al Deployment que Pods debe controlar(selector=selecciona estos Pods).Deployment es una extensión de ReplicaSet y puede controlar un set o conjunto de objetos Kubernetes.Setear selector.matchLabels a component: api significa que este Deployment controlará los pods que tengan la label de component: api.
+  -spec.template es la plantilla para configurar los pods.Es practicamente igual que en el ejemplo anterior.
+
+ De nuevo aplico el archivo de la misma forma:
+ >>kubectl apply -f api-deployment.yaml
+ Me aseguro que el Deployment ha sido creado:
+ >>kubectl get deployment
+ Aqui el autor tiene problemas.Este deployment no debería tardar.Veamos como arreglar posibles problemas
+
+			 INSPECCIONANDO RECURSOS/OBJETOS  KUBERNETES
+
+Un buen punto de partida es ejecutar el comando get sobre el recurso que necesite depurar:
+>>kubectl get deployment api-deployment
+Es posible que esto no muestre apenas información,puedo usar -o wide
+>>kubectl get deploy api-deployment -o wide <- sigue sin ser suficiente
+
+Para obtener detalles del deployment tendré que usar describe:
+>>kubectl describe pod podID
+
+Lo más importante será la parte inferior con los Events
+Veo que se le quedó los tres pods en CrashLoopBackOff,sin embargo,aún necesitamos más información así que imprimiremos los logs:
+>>kubectl logs resourceId
+
+		ADDING ENVIRONMENT VARIABLES TO A DEPLOYMENT.YAML
+
+Aqui puedo ver que la librería knex.js necesita un valor requerido,y está partiendo la aplicación.Vamos a tener que añadir variables de entorno al deployment:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      component: api
+  template:
+    metadata:
+      labels:
+        component: api
+    spec:
+      containers:
+        - name: api
+          image: fhsinchy/notes-api
+          ports:
+            - containerPort: 3000
+		  #estas son las environment variable para kenx.js
+		  env:
+		    - name: DB_CONNECTION
+			  value: pg
+
+El campo containers.env contiene todas las variables de entorno.Si miro más de cerca veré que sólo ha añadido una.La DB_CONNECTION indica que la aplicación está usando una database PostgreSQL.Añadir esta variable deberia corregir el problema.
+Puedo simplemente reaplicar el archivo de configuración:
+>>k apply -f api-deployment.yaml
+Está vez dirá que el recurso ha sido configurado.Esta es la belleza de Kubernetes,puedo arreglar problemas y reaplicar la misma configuración inmediatamente.
+De nuevo hacemos un get del deploy y de los pods para ver su estado/salud.Todos deberían estar READY.
+
+		CREANDO EL DEPLOYMENT DE LA BASE DE DATOS
+
+Fijate que el deployment anterior es sólo para la app.Es tiempo de roll outear la instancia de la base de datos.
+Creo un nuevo archivo dentro de k8s,lo llamo postgres-deployment.yaml y pongo el siguiente código en él:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+	  component: postgres
+  template:
+    metadata:
+	  labels:
+	    component: postgres
+	spec:
+	  containers:
+	    - name: postgres
+		  image: fhsinchy/notes-postgres
+		  ports:
+		    - containerPort: 5432
+		  env:
+		    - name: POSTGRES_PASSWORD
+			  value: 63eaQB9wtLqmNBpg
+			- name: POSTGRES_DB
+			  value: notesdb
+
+La configuración en sí es muy similar a la previa.PostgreSQL corre en el 5432 por defecto,y la variable POSTGRES_PASSWORD es requerida para que se ejecute un contenedor con la imagen de postgres.Esta password será también usada para conectar esta db con la API.
+La variable POSTGRES_DB es opcional,sin embargo,en este proyecto es necesaria.
+Por simplicidad vamos a dejar el numero de replicas en 1.Aplicamos el archivo con kubectl apply como siempre.
+>>kubectl apply -f postgres-deployment.yaml
+Puedo asegurarme que está corriendo tanto el deploy como el pod:
+>>kubectl get deploy | kubectl get po
+
+Aunque todo está corriendo exitosamente,hay un gran problema con el deploy de la base de datos.Ahora mismo,la data está almacenada en el sistema de ficheros del contenedor,es decir,está en el almacenamiento de ese ontenedor,haciendola volátil entre otras cosas.
+Si por un casual el pod cayerá,el deployment levantaría uno nuevo,perdiendo todos los datos.Para evitar esto,puedo almacenar esa data en un espacio separado afuera del pod pero dentro del cluster.
+Manejar este almacenamiento es un problema distinto de manejar instancias.El subsistema PersistentVolume en Kubernetes provee una API para usuarios y administradores que abstrae los detalles de como el almacenamiento es provisto y consumido
+
+			PERSISTENT VOLUMES AND PERSISTENT VOLUME CLAIMS
+
+De acuerdo a la doc de kubernetez:
+"Un PersistentVolume(PV) es una pieza de almacenamiento en el cluster que ha sido provisionada por un admin o dinámicamente provisionada usando una StorageClass.Es un recurso en el cluster de igual forma que un nodo es un recurso en el cluster"
+
+Esto esencialmente significa que un PersistentVolume es una manera de tomar una parte de nuestro espacio de almacenamiento y reservarlo para un pod concreto.Los Volumes son siempre consumidos por pods y no por objetos de alto nivel como un deployment.
+Si quiero usar un volumen con un deployment que tiene múltiples pods,tendré que ir a través de algunos pasos adicionales.
+
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: database-persistent-volume
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+
+Los campos apiVersion,kind y metadata sirven al mismo propśoito que en cualquier archivo de configuración.El campo spec,sin embargo,contiene campos nuevos:
+  - spec.storageClassName indica el nombre de la clase para este volumen.Asume que un cloud provider tiene 3 tipos de almacenamiento disponibles.Estos pueden ser slow,fast y very fast.
+El tipo de almacenamiento que obtenga de mi provider dependerá de la cantidad de dinero que pague.Si pido un almacenamiento very fast tendré que pagar más dinero.Estos tres tipos son las clases.En este ejemplo estoy usando manual como ejemplo.Puedo usar el que quiera en mi cluster local.
+  - spec.capacity.storage es la cantidad de almcenamiento que tendrá este volumen.Le daré 2 gigabytes.
+  - spec.accessModes establece el modo de acceso para el volumen.Hay tres tipos posibles de modo de acceso.ReadWriteOnce significa que el volumen puede ser montado como lectura-escritura por un único nodo.
+Por otro lado ReadWriteMany establece que el volumen puede ser montado para lectura y escritura por muchos nodos.
+ReadOnlyMany es la tercera opción y significa que el volumen puede ser montado para lectura por muchos nodos.
+Logicamente tenemos un sólo nodo y además queremos escribir en él asi que la opción a tomar esta clara.
+  - spec.hostPath es algo específico al desarrollo.Indica el directorio en mi cluster mononodo local que será tratado como volumen persistente./mnt/data significa que la data guardada en este volumen vive dentro del directorio /mnt/data del cluster(y como accedo a él)
+ 
+ Sólo me falta aplicar el archivo:
+ >>kubectl apply -f database-persistent-volume.yaml
+ Importante comprobar si ha sido creado el volumen:
+ >>k get pv 
+ Fijate que esto es sólo la creación de un espacio.Este espacio aún no ha sido reclamado por ningun pod(son los Pods los que van a reclamar espacio para sus contenedores)
+
+ Un PersistentVolumeClaim es una petición para almacenamiento que puede realizar un Pod.Debo asumir que en un cluster en producción tendré un montón de volumenes.Esta claim/petición debe definir las características que un volumen debe cumplir para ser capaz de satisfacer las necesidades del pod.
+Teniendo en cuenta este pequeño ejemplo
+
+	MODEL 1 		MODEL 2 		MODEL 3
+	128GB			256GB			512GB
+	SATA			NVME			SATA
+
+Ahora,yo reclamo un modelo que tenga al menos 200GB de almacenamiento y que sea un disco NVME.
+El primero ni siquiera llega a 200 además que es un SATA.El tercero no es NVME.El segundo cumple ambas,asi que es el disco que se me concederá.Con esto en mente,creo otro archivo para la petición por parte del pod:
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-persistent-volume-claim
+spec:
+  storageClassName: manual 
+  acessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+	  storage: 2Gi
+
+De nuevo apiVersion,kind y metadata sirven para lo mismo que hasta ahora.Las diferencias están en :
+  - spec.storageClassName en archivo de tipo PersistentVolumeClaim indicará ahora el tipo de storage que quiero reclamar.En este ejemplo implica que soĺo un Persistent Volume que tenga el spec.storageClass en manual será apto para consumir por esta claim/petición.Si tengo múltiples volumes con la clase manual,la petición será cualquiera de ellos y si no tengo un PersistentVolume con la clase manual un volume será aprovisionado dinámicamente(ya veré esto de volumenes aprovisonados dinámicamente)
+  - spec.acessModes de nuevo especifica el modo de acceso aquí.Este parámetro indica que esta petición quiere un storage que tenga el parámetro accessMode en ReadWriteOnce.Imagina que tengo dos volumenes con la clase manual.Uno de ellos tendrá los accessModes en ReadWriteOnce y el otro en ReadOnlyMany.Aplicar este archivo reclamará el volumen con el modo en ReadWriteOnce.
+  - resources.requests.storage es la cantidad de almacenamiento a reclamar.2Gi no significa que el volumen debe tener exactamente 2 gigabytes s,sino que debe tener como mínimo 2GB(importante es un limite inferior).En el proyecto él estableció la capacidad del volumen persistente en 5GB, lo cual es más que 2Gb (entiendo que esta acción dejará 3GB libres)Aplico el archivo:
+  >>kubectl apply -f database-persistent-volume-claim.yaml
+Ahora puedo investigar estos volumenes,deberia ver informacion interesante en el PV como que PVC lo pide y en que namespace,aparte de si está BOUND
+>>k get pv -o wide
+NAME                         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                                      STORAGECLASS   REASON   AGE
+database-persistent-volume   2Gi        RWO            Retain           Bound    default/database-persistent-volume-claim   manual                  5h43m
+
+Puedo ver el STATUS,el tipo en STORAGECLASS,el ACCESS MODES o el STATUS.
+>>k get pvc
+NAME                               STATUS   VOLUME                       CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+database-persistent-volume-claim   Bound    database-persistent-volume   2Gi        RWO            manual         3h
+De igual forma si investigo el PVC me dará info del PV también.
+
+		DYNAMIC PROVISIONING OF PERSISTENT VOLUMES
+
+En la sección anterior realicé un Persistent Volume y después realicé la claim o petición.Pero,que pasa si al realizar la petición no hay un Volumen creado previamente?
+En este tipo de situación, un Persistent Volume compatible con la claim será provisionado automáticamente.
+Para realizar una demostración,vamos a eliminar los PV y PVC creados anteriormente:
+>kubectl delete persistentvolumeclaim --all
+>>kubectl delete persistentvolume --all 
+Ojo con instrucciones tan genéricas como las anteriores,borrarán todos los existentes!
+
+Ahora abro el database-persistent-volume-claim.yaml y actualizo su contenido:
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-persistent-volume-claim
+spec:
+  accesModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+	  storage: 2Gi
+
+Hemos eliminado el campo spec.storageClass del archivo.Reaplico el archivo sin aplicar el que crea el persistent volume:
+NAME                               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+database-persistent-volume-claim   Bound    pvc-b5d5f91d-ae2f-4106-a2bb-ad515beec979   2Gi        RWO            standard       14s
+Esta vez puedo ver como se ha creado un PV y el PVC dinámicamente con un hash que lo identifica.
+
+					CONNECTING VOLUMES WITH PODS
+
+Ahora que ya hemos creado y reclamado un volumen,es hora de dejar que el pod con la base de datos use este volumen.Fijate que es ese pod el que necesita el store.
+Esto lo haré conectando el pod a pvc que hice en la sub-sección previa.Abro el postgres-deployment.yaml y actualizo su código:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: postgres-deployment
+spec:
+  replicas:1
+  selector:
+    matchLabels:
+	  component: postgres
+  template:
+    metadata:
+	  labels:
+	    component: postgres
+    spec:
+	  # volume configuration
+	  volumes:
+	    - name: postgres-storage
+		  persistentVolumeClaim:
+		    claimName: database-persistent-volume-claim
+	  containers:
+	    - name: postgres
+		  image: fhsinchy/notes-postgres
+		  ports:
+		    - containerPort: 5432
+		  # volume mounting configuration for the container
+		  volumeMounts:
+		    - name: postgres-storage
+			  mounthPath: /var/lib/postgresql/data
+			  subPath: postgres
+		  env:
+		    - name: POSTGRES_PASSWORD
+              value: 63eaQB9wtLqmNBpg
+			- name: POSTGRES_DB
+			  value: notesdb
+
+He añadido dos nuevos campos al archivo de configuración.
+  - el campo spec.volumes contiene la información necesaria para el pod para que pueda encontrar el volumen de tipo pvc(básicamente el nombre)
+  - containers.volumeMounts contiene información necesaria para montar el volume dentro del contenedor(es decir,que folder voy a persistir!)
+  containers.volumeMounts.name tiene que hacer match con spec.volumes.name(pues es ese pvc el que quiero usar)
+  /var/lib/postgresql/data es el directorio por defecto para la data en postgreSQL,siempre hay que persistir este directorio en principio.
+  - containers.volumeMounts.subPath indica un directorio que será creado dentro del volumen.Se asume que voy a usar el mismo volumen para otros pods también.
+  Toda la data guardada en el directorio /var/lib/postgresql/data del container será persistida en el directorio postgres del volumen.
+  Recuerda que el volumen está afuera de los Pods pero dentro del cluster.
+  Reaplico el archivo:
+  >>k apply -f file.yaml
+Ya tengo un despliegue de una base de datos sin riesgo de pérdida de datos!
+
+IMPORTANTE:el deploy de la base de datos sólo tiene una replica.Si hubiera más de una replica,las cosas habrián sido diferentes.
+Múltiples pods accediendo al mismo volumen(fijate que aqui será siempre uno,pues no lo replico);de nuevo múltiples pods con la bd accediendo al mismo volumen sin conocerse entre ellos puede derivar en resultados catastróficos(uno elimina mientras el otro intenta actualizar ese documento que ya no existe,etc...)En estos casos crear subdirectorios para los pods dentro del volumen suele ser una buena idea(un pod irá a postgres/pod1 el otro a postgres/pod2 ...) asi no acceden a los datos de otro pod.
+
+					WIRING EVERYTHING UP	
+
+Ahora que ya tengo la API y su database corriendo,es tiempo de terminar algun trabajo que nos quedaba y finalizar el networking.
+
+Antes de empezar a usar más Service,fijate en la imagen para el networking que el autor ha planeado(puedo ver el nodo minikube al que le entra una request por el Service Load Balancer la cual va a cualquiera de las 3 replicas.Estos tres pods se comunican con un Service tipo ClusterIP con el pod con la base de datos.
+
+Un ClusterIP expone una aplicación dentro del cluster y no permite tráfico exterior.Este service nos falta aún,asi que creo el postgres-cluster-ip-service.yaml:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: postgres
+  ports:
+    - port: 5432 # el que va del Service hacia afuera
+	  targetPort: 5432
+
+Como puedo ver la configuración para un ClusterIp es idéntica que para un Load Balancer.Lo único que difiere es el valor para el spec.type
+
+La siguiente configuración es para el Service LoadBalancer que expondrá mi app API al mundo exterior.Creo el file api-load-balancer-service.yaml:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-load-balancer-service
+spec:
+  type: LoadBalancer
+  selector:
+    component: api
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+Esta configuración es idéntica a la anterior.La app API corre en el puerto 3000 y es por eso por lo que lo exponemos y lo enlazamos.
+La última acción a realizar es añadir el resto de variables de entorno al deployment de la api:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: api-deployment
+spec:
+  replicas: 3
+  selector: 
+    matchLabels:
+	  component: api
+  template:
+    metadata:
+	  labels:
+	    component: api
+	spec:
+	  containers:
+	    - name: api
+		  image: fhsinchy/notes-api
+		  ports:
+		    - containerPort: 3000
+		  env:
+		    - name: DB_CONNECTION
+			  value: pg
+			- name: DB_HOST
+			  value: postgres-cluster-ip-service
+			- name: DB_PORT
+			  value: '5432'
+			- name: DB_USER
+			  value: postgres
+			- name: DB_DATABASE
+			  value: notesdb
+			- name: DB_PASSWORD
+			  value: 63eaQB9wtLqmNBpg
+
+Anteriormente sólo tenia la DB_CONNECTION.Las nuevas variables son:
+ DB_HOST: indica la dirección host para el servicio database.En un entorno no-containerizado usualmente es 127.0.0.1 pero en un entorno Kubernetes no voy a saber esa IP del pod database.Por ello tengo que usar el nombre del servicio que expone esa database.
+ DB_PORT es el puero expuesto desde el servicio database,el cual era el 5432
+ DB_USER es el usuario para conectarse a la base de datos,por defecto postgres
+ DB_DATABASE es la database a la que los pods de este deployment intentarán conectarse.Tiene que hacer match con spec.containers.env.DB_DATABASE del postgres-deployment.yaml.
+ DB_PASSWORD es la password que usarán.De nuevo tendrá que hacer match con la base de datos que creo con el postgres-deployment y su campo spec.containers.env.DB_PASSWORD
+
+Fijate pues que crear una base de datos implica exponer en su Deploy una base de datos y una password y en el Deploy de los pods que conecten a ella hacer match con ambos aparte del SErvice ClusterIP,etc.Además del volume.Sin embargo no parece complicado,solo que son varios pasos.
+
+Con todo esto realizado ya puedo testear la app API.
+>>kubectl apply -f k8s
+Si tengo errores puedo tratar de depurarlos primero,después borro los recursos y reaplico los archivos.Debo asegurarme que todo esta UP y running
+Para acceder a la app,uso el comando service de minikube:
+>>minikube service api-load-balancer-service
+
+Está es la respuesta por defecto:
+// 20210616163457
+// http://192.168.49.2:31055/
+
+{
+  "error": false,
+    "message": "Bonjour, mon ami"
+}
+Ya puedo hacer algun test con Insomnia o Postman.Puedo ver esos tests en api/tests/e2e/api/routes/notes.test.js.
+Debería tratar de hacer alguno.
+
+			WORKING WITH INGRESS CONTROLLERS
+
+Nota: puedo ver el consumo de recursos con kubectl top node | pod para ver el consumo por cada nodo del cluster o por cada pod
+Parece que sólo funciona para un cluster en remoto.
+Otra opción importante es kubectl cluster-info.
+También puedo describir cada nodo
+>>kubectl describe nodes | nodeId
+
+Hasta ahora he usado los tipos del objeto Service ClusterIp para exponer una aplicación dentro del cluster y LoadBalancer para exponer una aplicacion afuera del cluster.
+
+Aunque hemos citado LoadBalancer como el tipo de servicio estándar para exponer una app afuera del cluster,tiene algunas desventajas.
+Cuando se usa un Service Load Balancer para exponer aplicaciones en entornos Cloud,tendré que pagar por cada servicio expuesto individualmente lo cual puede ser muy caro en caso de proyectos enormes.
+Hay otro tipo de servicio llamado NodePort que puede ser usado como alternativa al tipo LoadBalancer.Un NodePort abre un puerto en todos los nodos del cluster,importante
+
+			NODEPORT SERVICE
+
+NodePort abre un puerto especifico en cada nodo de mi cluster, y maneja cualquier tráfico que vaya por ese puerto abierto.
+Nota: parece similar a un Load Balancer,entonces cual es la diferencia,si ambos manejan tráfico externo.
+
+Como ya sé,los servicios agrupan juntos un número determinado de pods y controlan la manera en la que son accedidos.Así que cualquier petición que alcance el servicio a través de ese puerto expuesto terminará en el pod correcto.
+Un ejemplo de configuración para crear un NodePort sería:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-kube-node-port
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+	  targetPort: 8080
+	  nodePort: 8080
+  selector:
+   component: web
+   
+El spec.ports.nodePort field debe tener un valor entre 30000 y 32767.Este rango esta fuera de lo puertos bien-conocidos.
+
+Nota: puedo intentar reemplazar el servicio LoadBalancer que he creado con un servicio NodePort.No deberia ser complicado y debo tomarmelo como un test para probar lo aprendido hasta ahora.
+
+Para resolver ciertos problemas la API Ingress fue creada.Ingress no es realmente un tipo de servicio.Es un enrutador,se pone en frente de multiples servicios y actua como un router redirigiendo el tráfico al pod correcto.
+Adicionalmente un IngresController es requerido para trabajar con recursos de tipo Ingress en el cluster.Puedo encontrar una lista de los controllers que ofrece la API Ingress en la documentación Kubernetes.Empecemos montando nuestro primer Ingress Controller
+
+			SETEANDO EL NGINX Ingress Controller
+
+En este ejemplo,extenderé la API notes añadiendo un frontend a ella.Y en vez de usar un Service Load Balancer o NodePort,usaremos la API Ingress para exponer la aplicación.
+El controlador que usaré será el NGINX Ingress Controller,por ello un NGINX será usado para enrutar peticiones a diferentes servicios aquí.El controlador NGINX-Ingress-Controller hace muy fácil trabajar con configuraciones NGINX en un cluster Kubernetes.
+
+El código para el proyecto está dentro del directorio fullstack-notes-application del repo del autor.
+
+Veré el mismo directorio k8s.Tiene todos los archivos de configuración excepto el api-load-balancer-service.yaml.La razoń de esto,es que en este proyecto el antigüo LoadBalancer será reemplazado con un Ingress.Además, en vez de exponer la API,expondré el frontend.
+
+Antes de que empiece a escribir los nuevos archivos de configuración,debería echar un vistazo a la imagen de como es la nueva aplicación:
+
+Workflow de la nueva app03:
+Un usuario visita la apllicación frontend y envía la data necesaria.La aplicación frontend entonces direcciona la data enviada a la API back-end.
+La API entonces persiste lo datos en la base de datos y también puede enviar datos al frontend(de echo tendrá que hacerlo).El ruteo de las peticiones se consigue usando NGINX.
+Puedo echar un vistazo al archivo nginx/production.conf de ese proyecto que me he bajado del repo con Git para entender como se ha montado el routing de ese Nginx:
+
+upstream client {
+  server client:8080;
+}
+
+upstream api {
+  server api:3000;
+}
+
+server {
+   location / {
+     proxy_pass http://client;
+   }
+
+   location /api {
+     rewrite /api/(.*) /$1 break;
+     proxy_pass http://api;
+   }
+}
+Puedo ver la declaración de dos upstream(investigar más sobre upstream).
+
+Este diagrama con el front y el back además del Ingress puede ser explicado de la siguiente forma:
+
+- El Ingress actua como punto de entrada y router para esta aplicación.Básicamente todo pasa por él.Esto es un NGINX de tipo Ingress asi que el puerto será el por defecto 80 de cualquier nginx.
+
+- Cada petición que viene a '/' (comes to) será enrutada hacia la app frontend.Asi que si la URL para esta aplicación es https://kube-notes.test entonces cualquier petición entrante en https://kube-notes.test/foo o https://kube-notes.test/bar será manejada por esa app de frontend(todo lo que sea / y hacia adentro y que no cumpla con lo siguiente)
+
+- Cada petición que viene a /api será enrutada hacia el API backend.Asi que cualquier peticion contra https://kube-notes.test/api/foo o https://kube-notes.test/api/bar será manejada por el backend.
+
+Es totalmente posible configurar el servicio Ingress para trabajar con subdominios en vez de subrutas,pero esta vez iremos por el acercamiento a través de paths.
+En esta sección tendré que escribir 4 nuevos config files:
+
+-ClusterIP: configuración para el API Deployment
+-Deployment: configuración para la app del frontend
+-ClusterIP: configuración para la app de frontend
+- Ingress: configuración para el routing
+
+Iremos de forma rápida por los tres primeros.El primero es el api-cluster-ip-service.yaml:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-cluster-ip-service
+spec:
+  selector:
+    component: api
+  type: ClusterIP
+  ports:
+    - port: 3000
+	  targetPort: 3000
+
+Aunque en la app 02 expuse la app a través de un Load Balancer y en última instancia a través de un NodePort esta vez dejaré al Ingress que haga el trabajo duro mientras que expongo la API internamente con el reliable ClusterIP
+Ahora creo el client-deployment.yaml responsable de correr el frontend:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+	  component: client
+  template:
+    metadata:
+	  labels:
+	    component: client
+	spec:
+	  containers:
+	    - name: client
+		  image: fhsinchy/notes-client
+		  ports:
+		    - containerPort: 8080
+		  env:
+		    - name: VUE_APP_API_URL
+			  value: /api
+
+Fijate como en la variable spec.containers.ports que pide un array esta vez es containerPort,entiendo que es el puerto que se expone¿?.De todas formas debo recordar que containerPort es para los Deployment.
+La env VUE_APP_API_URL indica el path al que serán forwardeadas las peticiones a la API.Esto será manejado a su debido tiempo por Ingress.
+
+Para exponer esta aplicación cliente otro ClusterIP service es necesario(fijate como es imposible librarse de servicios ClusterIP por la naturaleza encapsulada de los pods.Asi pues,creo otro archivo llamado client-cluster-ip-service.yaml con el siguiente código:
+
+apiVersion: v1
+metadata:
+  name: client-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: client
+  ports:
+    - port: 8080
+	  targetPort: 8080
+
+Todo esto expone el puerto 8080 dentro del cluster en donde la aplicación frontend llamada client corre por defecto.
+La siguiente configuración es el ingress-service.yaml y su código es el siguiente:
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ingress-service
+  annotations:
+    kubernetes.io/ingress.class: nginx
+	nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  rules:
+    - http:
+	    paths:
+		  - path: /?(.*)
+		    backend:
+			  serviceName: client-cluster-ip-service
+			  servicePort: 8080
+		  - path: /api/?(.*)
+			backend:
+			  serviceName: api-cluster-ip-service
+			  servicePort: 3000
+
+Esta configuración puede parecer poco familiar pero es bastante sencilla(straighforward):
+
+1º:la API Ingress está todavía en fase beta asi que la apiVersion es extensionss/v1beta.Aunque esté en beta,la API es muy estable y usable en entornos de producción.
+
+2º:el campo kind y metadata.name sirven al mismo propósito que cualquier otro archivo de configuración.
+
+3º: metadata.annotations puede contener información dependiendo de la configuración Ingress.El campo kubernetes.io/ingress.class: nginx indica que el objeto Ingress que crearé debe ser controlado por el controller ingress-nginx. nginx.ingress.kubernetes.io/rewrite-target indica que quiero reescribir la URL objetivo .
+Nota: en proyectos anteriores usé nginx.ingress.kubernetes.io/use-regex: "true",pero parece que no hacía falta¿?(pues él usa regexp en las rutas también)
+Adicionalmente usé spec.rules.host: posts.com.Aqui no sucede esto
+
+4º:spec.rules.http.paths contiene configuración dependiente de las rutas individuales que ví previamente en el nginx/production.conf.El paths.path indica el path que debe ser enrutado.backend.serviceName es el servicio hacia el que el anteriormente mencionado path debe ser enrutado y backend.servicePort es el puerto objetivo dentro de ese servicio.
+
+5º: /?(.*) y /api/?(.*) son simples regexp las cuales significan que /api/loquesea irá para el pod con la api y si no para el frontend.
+
+Nota: la forma en la que se configuran los rewrites cambia de vez en cuando asi que es buena idea chequear la documentación oficial.
+Antes de que pueda aplicar la nueva configuración tendré que activar el addon Ingress para minikube usando el commando addons.La sintaxis genérica es la siguiente:
+>>minikube addons <option> <addon_name>
+Para activar el addon ingress deberé ejecutar pues:
+>>minikube addons enable ingress
+
+De igual manera puedo usar la opcion disable para el commando addon para desactivar cualquier addon.
+Nota:se pueden pasar imagenes a la cache de minikube,cada cluster que se cree tendrá esa imagen por defecto,hasta que la saque de la cache.
+
+Nota:minikube está configurado para persistir data sólo en ciertos directorios
+            A note on mounts, persistence, and minikube hosts
+minikube is configured to persist files stored under the following directories, which are made in the Minikube VM (or on your localhost if running on bare metal). You may lose data from other directories on reboots.
+
+/data
+/var/lib/minikube
+/var/lib/docker
+/var/lib/containerd
+/var/lib/buildkit
+/var/lib/containers
+/tmp/hostpath_pv
+/tmp/hostpath-provisioner
+
+EStoy corriendo la Minikube VM en bare metal¿?.Ejemplo pretty straighforward de un PV:
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv0001
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 5Gi
+  hostPath:
+    path: /data/pv0001/
+Fijate como mediante subdirectorios puedo hacer lo que quiera realmente.
+
+Puedo cambiar la memoria y las cpus del cluster(por defecto 2048 y 2 cpus).Para que tome efecto deberá ser un cluster nuevo(minikube delete + miminkube start).Es decir que hay que cambiarlas sin tener un cluster ejecutandose,pues una vez que se crea permanece con la memoria y cpu que se le asignó.El archivo donde se guarda esta configuracion es:
+cat ~/.minikube/config/config.json
+También puedo pasarle un tamaño de disco con --disk-size 20GB(puedo ver todo esto con minikube start --help):
+>>minikube start --driver=virtualbox --memory=8192mb --disk-size=8192mb
+Por defecto guarda 20Gb y el mínimo son 2GB
+
+Volviendo a la app03, una vez que he activado el addon ingress,puedo aplicar los archivos de configuración.Se sugiere borrar todos los recursos(services,deployments y persitent volume claims):
+>>kubectl delete ingress --all
+>>kubectl delete service --all
+>>kubectl delete deployment --all
+>>kubectl delete persistentvolumeclaim --all
+>>kubectl apply -f k8s
+
+Una vez que se hayan creado todos los recursos(puedo utilizar el comando get para asegurarme) puedo acceder a la aplicación en la IP del cluster minikube:
+>>minikube ip
+Esto también lo puedo ver inspeccionando el Ingress:
+>>kubectl get ingress
+
+Puedo realizar operaciones CRUD simples.El puerto será el 80 ya que es un nginx.
+Puedo realizar un montón de cosas si aprendo a configurar nginx.Despues de todo,esto es para lo que se usa el controlador,para almacenar configuraciones nginx en un objeto ConfigMap Kubernetes, lo cual aprenderé en la siguiente subsección.
+Deberia poder ver la app en la IP de mi minikube.Además de no perder la data más.
+
+		SECRETS AND CONFIG MAPS IN KUBERNETES
+
+Hasta ahora he guardado información sensible como la POSTGRES_PASSWORD en texto plano,lo cual no es una buena idea.
+Para almacenar ete tipo de valores en mi cluster puedo usar un objeto Secret que es una forma mucho más segura de almacenar passwords,tokens,etc...
+Para almacenar información en un Secret primero tengo que pasar esa data a través de base64.Si el texto plano es 63eaQB9wtLqmNBpg entonces debo ejecutar el siguiente comando para obtener una versión codificada en base64:
+
+>echo -n "63eaQB9wtLqmNBpg" | base64 <- es un pipe
+>NjNlYVFCOXd0THFtTkJwZw==
+
+Este paso no es opcional,tengo que ejecutar el texto plano sobre base64.Ahora crea un archivo llamado postgres-secret.yaml dentro del k8s directorio y pon el siguiente código en él:
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+data:
+  password: NjNlYVFCOXd0THFtTkJwZw==
+
+Los campos apiVersion,kind y metadata son autoexplicativos.El campo data alberga el secreto actual
+Como se puede observar,he creado un par de clave-valor donde la key es 'password' y el valor es NjNlYVFCOXd0THFtTkJwZw==.Usaré el metadata.name para identificar este Secret en otros archivos de configuración y la key para acceder al valor de la password.
+
+Tendré que cambiar ahora donde llamaba en bruto a la password,esto es en el deploy del posgrest y en el de la app llamada api.
+
+En el deploy  postgres-deploy.yaml:
+     env:
+   	# not putting the password directly anymore
+       - name: POSTGRES_PASSWORD
+         valueFrom:
+           secretKeyRef:
+             name: postgres-secret
+             key: password
+       - name: POSTGRES_DB
+         value: notesdb
+
+En el deploy de la app api:
+	env:
+	  - name: DB_CONNECTION
+	  .... asi hasta la POSTGRES_PASSWORD
+	  - name: DB_PASSWORD
+	    valueFrom:
+		  secretKeyRef:
+		    name: postgres-secret
+			key: pasword
+
+Ahora reaplico esta nueva configuración ejecutando el siguiente comando sobre la carpeta entera(fijate como si esta todo correcto no hay ningun problema en reaplicar todo!):
+>kubectl apply -f k8s
+
+Dependiendo del estado de mi cluster puedo ver una salida diferente.(si tengo problemas borra todos los recursos Kubernetes y crealos de nuevo)
+Usa el comando get para inspeccionar y asegurarte que todos los pods están up y running.
+Intenta acceder a la app y crear una nota.
+
+Hay otra manera de crear secretos sin ningun archivo de configuración.Para crear el mismo secreto usando kubecl y la CLI,puedo ejecutar el siguiente comando:
+>kubectl create secret generic postgres-secret --form-literal=password=63eaQB9wtLqmNBpg
+
+Este es un acercamiento más conveniente ya que puedo evitar todo el proceso de encriptar en base64.En este caso el secreto será encodificado automáticamente.
+
+     B-CONFIGMAPS
+
+Un ConfigMap es similar aun Secret pero está diseñado para albergar información no sensible.
+Para poner el resto de variables de entorno del deploy de la API dentro de un ConfigMap,crea un nuevo archivo llamado api-config-map.yaml dentro del directorio k8s con el siguiente código:
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config-map
+data:
+ DB_CONNECTION: pg
+ DB_HOST: postgres-cluster-ip-service
+ DB_PORT:'5432'
+ DB_USER: postgres
+ DB_DATABASE: notesdb
+
+Como siempre apiVersion,kind y metadata son autoexplicativas.El campo data puede albergar variables de entorno como pares de clave-valor.
+
+A diferencia del Secret, las llaves aqui tienen que hacer match con la llave exacta requerida por la API.Asi pues,simplemente hemos copiado las variables desde el api-deployment.yaml y pegado con una ligera modificación en la sintaxis.
+Para hacer uso de este secreto de tipo ConfigMap,abro el api-deployment.yaml y actualizo su contenido:
+
+  ports:
+    - containerPort: 3000
+  envFrom:
+    - configMapRef:
+	    name: api-config-map
+  env:
+    - name: DB_PASSWORD
+	  valueFrom:
+	    secretKeyRef:
+		  name: postgres-secret
+		  key: password
+
+El archivo entero permanece intacto excepto el campo spec.template.spec.containers.env.
+Hemos movido todas las variables de entorno al ConfigMap.spec.template.spec.containers.envFrom 
+Ahora aplico la nueva configuración
+Los objetos Secret y ConfigMap tienen algunos trucos más que no vamos a explicar.Para ello tenemos la documentación oficial.
+
+			PERFORMING UPDATE ROLLOUTS IN KUBERNETES
+
+			

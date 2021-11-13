@@ -1,0 +1,970 @@
+						PART II
+
+				VIDEO 97 LESSONS FROM APP#1										
+
+Usar Desarrollo2.4GZ en el aula 2
+Antes de pasar a la siguiente aplicación veamos qué es lo que hemos aprendido:
+1: Intercambiar datos en microservicios es un desafio.Además era una pequeña aplicación.Será aun más complejo en aplicaciones grandes
+2: Aprendimos que hay varias de comunicación(sync,async y una combinación de ambas).Nos seguiremos centrando en async
+3:La comunicación asincrona se centra en comunicar cambios usando eventos que se mandan al event-bus(como vimos un evento puede ser cualquier cosa,un array ,un objeto... eso es lo de menos) 
+4: la comunicación asincrona hace que cada servicio sea 100% autosuficiente.Es muy fácil manejar la recuperacion de un servicio caido
+5: Docker hace muy fácil empaquetar servicios.
+6:Kubernetes es un dolor,pero hace muy fácil desplegar y escalar 
+
+No sólo aprendí esto,sino que también nos encontramos con cosas dolorosas y/o que hicimos mal:
+1: Mucho código duplicado <- vamos a tratar de corregir esto creando una libreria central
+2: fue difícil entender el flujo de eventos entre servicios <- entender el flujo de eventos es fundamental,asi que los definiremos de forma precisa en esa libreria 
+3: fue difícil entender que propiedades tiene que tener un evento.Esta vez crearemos documentación para arreglar esto
+4: fue dificil testear eventos(o tedioso)usaremos tests
+5: kubernetes podia hacer la maquina laggear: usaremos la cloud
+6: nunca manejamos si varios usuarios crean comentarios,posts,etc.Se perderian datos en nuestra app con mucha concurrencia.Introduciremos código para manejar problemas de concurrencia.
+
+						VIDEO 98 APP OVERVIEW
+
+La aplicación que vamos a crear es significativamente más grande.Va a tomar a StugHub.com como base,una web de venta y compra de tickets por parte de los usuarios para cualquier tipo de evento(conciertos,baloncesto,baseball,etc...)
+
+Implementaremos funcionalidad como congelar un ticket por un usuario
+
+Funcionalidades que tendrá la app:
+1: los usuarios pueden subir un ticket para venderlo
+2: otros usuarios pueden comprar ese ticket
+3: cualquier usuario puede subir tickets o comprarlos
+4: cuando un usuario quiera comprar un ticket se 'congelará'
+5: mientras esté  congelado ningun otro usuario puede comprarlo 
+
+						VIDEO 99 RESOURCE TYPES
+
+En total vamos a tener 4 tipos diferentes de recursos.Uno será un objeto User con las propiedades email y password(ver imagen); otro será un objeto/coleccion de Tickets(title,price ,userId y orderId)
+También habrá un objeto Order con las propiedades userId,status,ticketId,expiresAt y otro Objeto Charge con orderId,status,amount,stripeId,	stripeRefundId)
+El objeto Order representa la intención de comprar un ticket
+
+						VIDEO 100 RESOURCE SERVICES
+
+En total vamos a terminar con 5 servicios:
+
+1º: Auth: todo lo relacionado a signup | signin | signout
+2º: tickets: relacionado a la creación&edición de tickets.Este servicio sabrá cuando un ticket puede ser actualizado,su precio
+3º: orders: ordena la creación|edición
+4º: expiration: vigila por si se van a crear ordenés, y las cancela al de 15 minutos
+5º:payments: maneja pagos con tarjeta.Cancela ordenes si el pago falla,las completa si el pago es exitoso.
+
+Fijate que estamos creando casi un servicio por cada tipo de recurso,a excepción del expiration.Esto es así porque es muy fácil de enseñar para Stephen,pero puede que yo quiera o necesite otra implementación en el futuro.La implementación 'feature-based' que se basa en crear servicios en base a las caracteristicas que tenga mi aplicación podría haber sido incluso una mejor aproximación.
+
+						VIDEO 101 EVENTS 
+
+En cuanto a los tipos de eventos que generaremos estarán:
+1º UserCreated
+2º UserUpdated
+3º OrderCreated
+4º OrderCancelled
+5º OrderExpired
+6º TicketCreated
+7º TicketUpdated
+8º ChargeCreated
+
+Esta vez crearemos la aplicación en Next.js.Next.js es un framework React del lado del servidor.Hay una muy buena razón por la que vamos usar renderización del lado del servidor. 
+Las aplicaciones auth tickets orders payments y expiration van a ser simples aplicaciones node/express.Sin embargo esta vez van a tener persistencia de datos en MongoDB.Si bien vamos a ser consistentes y usar MongoDB cabe recalcar que cualquier servicio podría usar PostGreSQL y funcionar todo igual.El servicio de expiration si va a usar otro gestor,y usará redis.De nuevo usamos Redis por una razón muy específica.
+Todos estos servicios van a hacer uso de una librería en común(va a ser un módulo npm que vamos a construir para compartir una parte del código de los servicios)Compartiremos middlewares,funciones,... lo que necesitemos entre servicios.
+Finalmente,en vez de crear nuestro event-bus vamos a usar algo llamado NATS Streaming Server.Esto en esencia es un event-bus y no tiene nada que ver con el término Network Address Translation.No hará mucho más que recibir eventos y emitirlos,de forma similar al bus de eventos casero que hicimos.
+
+					VIDEO 107 AUTH SERVICE SETUP
+
+Este srvicio estará a cargo de manejar el registro,login,etc...En total tendrá 4 endpoints diferentes asignados:
+Route							Method   Body                          Purpose
+/api/users/signup POST     {email:string,password:string} Create an account
+/api/users/signin POST     {email:string,password:string} Entrar a la cuenta
+/api/users/signout POST     {}                            Salir
+/api/users/currentuser GET   -                            Devolver info sobre el usuario actual.
+
+Creo un directorio para la app:
+>mkdir ticketing
+>> cd ticketing
+>> mkdir auth <- al servicio lo llamaremos auth
+>>cd auth
+>> npm init -y
+>> npm install typescript ts-node-dev express @types/express
+Ahora crearé un archivo de configuracion para TS.
+>>tsc --init
+Nota:se requiere una instalación global en este punto de TS.(npm install -g typescript)
+Esta vez vamos a crear un directorio 'src' para cada servicio y el index.ts.En él creamos un simple servidor:
+
+import express from 'express';
+import {json} from 'body-parser';
+
+const app = express();
+
+app.use(json());
+
+app.listen(3000,() => {
+   console.log('Auth service up on port 3000 ')
+	 })
+
+Por último vamos al package.json y creamos el script para el 'start':	 
+"start":"ts-node-dev src/index.ts"
+
+				VIDEO 108 SETUP K8S 
+
+Esta vez vamos a crear el servicio de kubernetes inmediatamente,ya que es asi como se hace y no al final.
+Fijate que crear el setup para kubernetes implica que cada servicio tenga su Dockerfile para que se pueda crear una imagen de él.Asi que hay que crearlo para el servicio auth.
+
+FROM node:alpine
+
+WORKDIR /app
+COPY package*.json ./ <- cuando son varios hay que poner ./ 
+RUN npm install
+COPY . .
+
+CMD ["npm","start"]
+
+Fijate como poner . y ./ es diferente,además siempre se crea un /app y no se trabaja en el root del contenedor.Por último fijate como con WORKDIR se creó la carpeta y se movió el puntero a /app a su vez,con lo que en el COPY ya copiamos de la raiz de afuera a adentro de /app
+
+Creo el .dockerignore para la carpeta node_modules y hago el build:
+>>docker build -t oscargm40/auth-service .
+>>
+
+Vamos a agregar algo más de configuración para subir esta imagen al cluster de kubernetes.Recuerda que este proceso es crear un deployment
+>>touch infra/k8s/auth-depl.yaml
+
+Recuerda que estos dos valores(los dos 'auth') deben coincidir:
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+
+Cada vez que cree un Deployment puedo crear un Service ya que es el networking.Casi siempre van a ir en un ratio 1:1 el Deployment y Service asi que es buena idea usar el mismo archivo:
+
+apiVersion: v1         
+kind: Service
+metadata:
+  name: auth-srv
+spec:
+  selector:
+    app: auth
+  type: ClusterIP
+  ports:
+   - name: auth
+     protocol: TCP
+     port: 3000  
+     targetPort: 3000
+
+El name del metadata es el que yo quiero dar al servicio,el selector dictamina que pods dará seguimiento y el tipo ClusterIP recuerda que es sólo para networking interno.
+
+						VIDEO 109 CONFIGURING SKAFFOLD
+
+Creo el skaffold.yaml en la raiz del proyecto:
+apiVersion: skaffold/v2alpha3
+kind: Config
+deploy:
+  kubectl:
+    manifests: 
+      - ./infra/k8s/*
+build:      
+ local:
+   push: false
+ artifacts:
+   - image: oscargm40/auth-service
+     context: auth
+     docker:
+       dockerfile: Dockerfile
+     sync:
+       manual:
+         - src: 'src/**/*.ts'
+           dest: .
+
+El push por defecto parece que es true.El Context es el nombre de la carpeta,ojo,no tiene nada que ver con el pod.Por último queremos estar mirando a todos los archivos typescript dentro de la carpeta 'src' asi que la expresión es 'src/**/*.ts' (para los js 'src/**/*.js')Ten en cuenta que estoy especificando que hay una carpeta src siempre lo primero.
+El dest a . va a meter el archivo del exterior en la misma ruta en el pod correspondiente.
+Levanto el skaffold dev y cambio algo.Deberia actualizarse sólo.
+Posibles problemas:
+Hay problemas con node 14.1+,puedo usar un Node <14 o :
+>>ts-node-dev --poll src/index.ts <- pasarle la flag --poll(mejor hacer downgrade,no,era mejor la flag)
+FROM node:13.14.0-alpine 
+FROM node:lts-alpine <- otra solucion(parece que ya lo arreglaron)
+Al final hay que poner la flag si o si además.
+
+					VIDEO 111 INGRESS_NGINX SETUP
+
+Recordemos que vamos a hacer muchos tests en esta app.Vamos a empezar por una simple petición GET.Recuerda que para poder acceder al pod hay sólo dos maneras,con un Node Port Service o a través del ingress-service.
+Nota:fijate que el ingress-nginx es un archivo yaml a aplicar,y cambiará según el SO o el CloudProvider.Esto iba a crear un namespace del que puedo sacar los pods para testear si se instaló.
+De nuevo debo recordar que el ingress-nginx service va a llevar un archivo de configuración con reglas sobre enrutamiento interno en el cluster de peticiones externas.Enrutará hacia un Service(pues es el punto de entrada) y de ahi se llegará al Deployment con el Pod.
+Asi pues,para testear esa ruta hay que crear este servicio(fijate que es un servicio,y el kind es de tipo Ingress:
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata: 
+  name: ingress-srv
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:    
+  rules:
+    - host: ticketing.dev
+      http:
+        paths:
+          - path: /api/users/?(.*)
+            backend:
+              serviceName: auth-srv
+              servicePort: 3000
+
+Fijate en un par de cosas,el serviceName corresponde al nombre del servicio que le dí,el host tendrá que existir ese dominio y el nombre que le voy a dar al objeto Ingress esta en metadata.
+Para ver que APIs y qué versiones de esas APIs soporta mi kubernetes:
+>>kubectl api-versions | less
+Para eliminar el WebHook de Validación(parece que es por reinstalar minikube)
+kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission
+
+IMPORTANTE:¿Qué es un webhook?Un Webhook es una forma que tiene una aplicación de proveer a otras aplicaciones con información en tiempo real.Un webhook envia data a otras aplicaciones a la vez que ésta sucede,con lo que la obtienes inmediatamente.Esto difiere de las APIs tipicas en las que tú tienes que pedir los datos frecuentemente.Un webhook es mucho más eficiente tanto para el proveedor como el consumidor.La única desventaja que tienen es la dificultad de configurarlos.
+A menudo se les refiere como Reverse APIs.Los webhooks usan peticiones HTTP(normalmente POST)
+Para consumir un webhook el que provea ese webhook debe tener una url a la que enviar peticiones.O sea que esa aplicacion tendrá un backend(o una API).Normalmente los webhooks son asíncronos.
+La mayoria de servicios usan webhooks:
+Twilio: twilio envia & reacciona a llamadas telefónicas y mensajes usando webhooks
+Github: Github actualiza aplicaciones sobre repositorios y acciones sobre ellos a través de webhooks
+Hay que tener en cuenta varios aspectos a la hora de crearlos,como securizarlos si es necesario(con tokens o Basic Auth,o firmando el proveedor y verificando esa firma) 
+Parece que deberia ver esta imagen al hacer un docker images(puede que minikube lo instale por defecto)
+k8s.gcr.io/ingress-nginx/controller  <- veo a minikube en vez de esta,además todo funciona bien
+
+					VIDEO 112 SETTING VIRTUAL HOSTS AND SECURITY WARNING
+
+Para cambiar el host virtual simplemente hay que ir a /etc/hosts o si estoy en Windows a C:\Windows...
+Una vez echo esto ya puedo acceder a https://ticketing.dev/api/users/currentuser pero saldrá un warning porque el certificado ssl es uno autofirmado y eso no le gusta a Google.
+Desafortunadamente debería haber un boton al pulsar en advanced que me dejara pasar pero el ingress-controller ha prevenido esto.
+Para dejar atrás este warning que parece fatal debo escribir 'thisisunsafe' en esa ventana(hacer click primero para coger el foco)
+Nota:al parecer es porque es un .dev en realidad.
+
+Notas:
+>>kubectl config get-clusters para ver los clusters
+>>kubectl config set-cluster Con esto podria tener dos proyectos.Uno en local y otro en GoogleCloud.
+Nota:GoogleCloud parece que da 300$ pero ojo con los nodos
+
+				VIDEO 114 REMOTE DEV WITH SKAFFOLD
+
+En nuestra máquina tenemos un único Node,actualmente con un único pod,y podemos acceder a él usando el servicio ingress-nginx
+Cuando use GoogleCloud tendré todo en un VM(vamos a usar GC en vez de AWS porque skaffold fue desarrollado por equipos de Google,con lo que tiene una estrecha integración con GC.
+Habrá que decir a skaffold que quiero ejecutar un Node hosteado en GoogleCloud.
+
+Hasta ahora skaffold está detectando cualquier cambio en los archivos 'sync' que le hemos pasado(cualquier typescript).Cuando sucede un cambio los inyecta en el pod.Esto es para los archivos sincronizados.
+Pero,¿que pasa con archivos que no están sincronizados,como un package.json?Cuando sucede esto,se hace un rebuild de la imagen en local.Bien,al usar GC va a haber un servicio llamado GoogleCloudBuild que se va a encargar de hacer los builds y rebuilds.Skaffold se comunicará con él cada vez que suceda un cambio a un archivo 'unsync'
+La razón de hacer el build en GC es decrementar el número de recursos consumidos por la máquina en local.De echo serán builds superrápidos porque GC tiene conexiones extremandamente rápidas a Internet
+
+				VIDEO 115 GOOGLE CLOUD INITIAL SETUP
+
+Para acceder a los 300$ durante 3 meses voy a https://google.cloud/free y accedo.Creo un proyecto y lo llamo 'ticketing-dev'.
+
+				VIDEO 116 KUBERNETES CLUSTER CREATION
+
+Lo primero vamos a crear un cluster de kubernetes,para ello voy a la sección donde pone kubernetes engine y selecciono clusters.
+Alli habilito la API y creo un clúster(de momento el normal).De nombre le doy 'ticketing-dev'y selecciono una zona fisícamente cercana a mi ubicación.
+En cuanto a la versión de kubernetes se recomienda alguna mayor que la 1.15(cuanto más nueva menos laggea)
+Despues voy a la seccion de nodos,y de momento lo dejamos en tres nodos.Pero vamos a configurarlos,asi que voy a nodos(antes era en default-pool)
+Alli veré el tipo de VM donde están corriendo(2 CPUs,4GB de memoria)
+
+				VIDEO 117 KUBECTL CONTEXTS
+
+Vamos a tener que configurar a que cluster apuntamos,ya que el comando kubectl puede configurar su context para apuntar a diferentes clusteres.Actualmente apunta a nuestro cluster en la máquina local.
+A esto se le llama 'context'.Cuando creamos nuestro primer cluster kubectl se autoconfiguró apuntando a ese context(son un conjunto de IPs,Ids,etc..)
+Hay dos formas de hacer esto,con el Dashboard de Google Cloud y buscando un archivo o con otra forma mucho más fácil que es instalar el SDK de Google Cloud.
+Es una CLI que me va a permitir interactuar con Google Cloud automáticamente.El SDK hace muchas cosas,entre ellas enseñara a kubectl a como conectarse con los clusters que vayamos creando.
+
+Para instalarlo voy a https://cloud.google.com/sdk/docs/install y simplemente bajo,lo necesario(no hay que iniciarlo aún).
+
+Nota:SDK(kit de desarrollo de Software).Un SDK permite analizar eventos dentro de la aplicación que lo instale.También puede analizar datos por medio de webhooks para saber si estas haciendo las cosas bien o mal.
+
+De nuevo,solo lo instalo segun el SO en el que esté,pero no uso 'gcloud init' aún.
+
+				VIDEO 118 INITIALIZING GOOGLE CLOUD SDK
+
+Ya deberia poder acceder a la ayuda con el comando 'gcloud'.Si no la da es que está mal instalado.Una vez instalado el SDK vamos a hacer login
+>>gcloud auth login 
+Saldrá el login de Google,logicamente escogo la cuenta de GoogleCloud.Permito al SDK y despues cierro la ventana.Ya puedo inicializarlo.
+>>gcloud init
+Primero eligo reconfigurar,despues le doy el ID del proyecto y configuro la zona.Puedo ir a kubernetes y clusteres para ver la zona donde levanté las vms(es la zona 17 europe west b1).
+Si bien hemos configurado el SDK aun no le hemos configurado el Context 
+
+				VIDEO 119 INSTALLING GCLOUD CONTEXT
+
+Desde ahora tengo dos opciones.Seguir usando Docker o no usarlo en absoluto.Tengo que elegir un camino.
+1ª: Si no quiero usar para nada Docker tendré que cerrar Docker Desktop	y ejecutar:
+>>gcloud components install kubectl
+>>gcloud container clusters get-credentials <cluster-name>
+2ª: Si aún quiero seguir con Docker debo ejecutar:
+>>gcloud container clusters get-credentials <cluster-name>
+
+Nota: para ver el cluster name voy de nuevo a los clusters y donde ponga name/nombre(aqui es ticketing-dev su nombre,no confundir con el ID)
+La primera opcion instalará kubectl en mi máquina local,por ello no voy a necesitar de la DockerEngine y tendría que parar DockerDesktop.
+Sin embargo vamos a seguir con la opción dos.
+
+Nota: para ver todos los contextos y poder cambiar entre ellos:
+>>k config get-contexts <- muestra todos los contextos
+>>k config set-context $CONTEXT_NAME <- para establecer un nuevo contexto(ojo, me cambio con use,esto sólo añade un nuevo contexto)
+>>k config use-context $CONTEXT_NAME <- cambiar la constante por el contexto al que quiero cambiar
+>>k config <- para desplegar la ayuda
+Nota: puedo ver un json con información importante con k config view (me dará una vista general de los users,contexts y cluster)
+Acuerdate de fijar las credenciales siempre,asinto.
+Si no encuentra las credenciales puedo usar las credenciales por defecto:
+>>gcloud auth application-default login <- Investigar más sobre esto
+
+			VIDEO 120 UPDATING THE SKAFFOLD CONFIG
+Paso 1º
+Recuerda que es GoogleCloudBuild el que va a buildear todas las imagenes,ya que lo va a hacer más rápido que mi máquina local(sobre todo más tarde cuando nos bajaremos dependencias más grandes)ESte paso lo hacemos actualizando el skaffold.yaml
+
+Paso 2º
+Nuestro ingress-nginx solo apunta a local.Debemos hacer que apunten al cluster en la nube
+
+Paso 3º
+Nuestros Virtual hosts deben apuntar al cluster remoto,es decir que el dominio virtual debe apuntar a la ip del cluster(actualmente apunta a minikube)
+
+Paso 4º
+Reiniciar skaffold.
+
+
+Paso 1:voy a GoogleCloud y busco la opcion Tools/Google Builds.La habilito.Ahora en el skaffold.yaml cambio un par de cosas.
+Nota: la forma en que GoogleCloud da un nombre a las imagenes siempre sigue un patrón:
+
+# local:
+#   push: false
+googleCloudBuild:
+  projectId: ticketing-dev-313817
+ artifacts:
+   - image: us.gcr.io/ticketing-dev-313817/auth
+     context: auth
+
+El patrón siempre es us.gcr.io/projectId/NombreDirectorioProyecto
+
+Nota: hay que comentar la sección de local,ya que sólo puede haber una.
+Además en el auth-depl.yaml ya no puedo usar la imagen local ya que obviamente no la encontrará desde el cluster:
+#image: oscargm40/auth-service:latest <- HAY QUE CAMBIARLO O COMENTARLO
+image: us.gcr.io/ticketing-dev-313817/auth
+
+				VIDEO 124 CREATING A LOAD BALANCER
+
+Voy a la documentación oficial de ingress-nginx y aplico los dos comandos para GC.Buscar estos comando en la web del ingress-controller.
+Nota: este comando creará dos cosas,el Ingress Controller(que está dentro del cluster) y el Load Balancer(que está fuera del cluster, y además es por donde va a acceder el mundo exterior)
+Esto es realmente relevante porque el virtual host debe apuntar a este Load Balancer.
+Para ver la IP voy al dashboard de GC y busco en Networking/NetwokServices y debería ver el load balancing,ya que lo acabo de crear con los dos comandos anteriores.Clicko en su nombre ya que hace de enlace.
+De momento ignoro warnings o errores y simplemente traigo la IP del socket(35.233.85.47) <- sin los puertos.
+La copio en /etc/hosts y apunto el falso dominio a la IP
+En el SO que sea simplemente debo poner:
+33.233.85.47 ticketing.dev <- los puertos ya los controlamos por otra parte asinto
+
+					VIDEO 125 FINAL TESTS
+
+Una vez echo todo esto es hora de ejecutar 'skaffold dev'.Tuve que hacer un gcloud init ,probablemente pueda suceder de todo en este punto.
+Para ver el histórico de logs puedo ir a Herramientas,GoogleCloud  y Historial(sin embargo no lo veo).
+Por último,desde ahora estoy pagando por el cluster,si quiero puedo pararlo borrandolo entero.Adicionalmente,tendré que cambiar yo las imagenes en los yaml ya que el puede que trabaje en local.
+Recuerda que la flag --poll era para poder usar Node14. Aun me faltaria agregarle Nodemon¿?
+
+					VIDEO 126 HANDLING ROUTES
+
+Vamos a crear un archivo por cada ruta.Dentro de él,al final exportaré router renombrandolo según la ruta:
+
+import express from 'express';
+
+const router = express.Router();
+
+router.get('/api/users/currentuser', () => {
+
+});
+
+export { router as currentUserRouter };
+
+					VIDEO 128 ADDING VALIDATION
+
+Vamos a agregar validación.Recuerda que va a ser un objeto con los campos email y password.  
+En vez de crear la validación manualmente vamos a usar el módulo npm express-validator. Lo primero pues es instalarlo con npm i express-validator
+import { body } from "express-validator";
+
+const router = express.Router();
+
+router.post(
+   "/api/users/signup",
+	 [
+	   body("email").isEmail().withMessage("Email must be valid"),
+	   body("password").trim().isLength({ min: 4, max: 20 })
+	  .withMessage("Password must be between 4 and 20 characters")
+	 ],
+	 (req: Request, res: Response) => {
+	   const { email, password } = req.body;
+
+Va como un middleware y además es un array.
+
+					VIDEO 129 HANDLING ERRORS
+
+Aun nos queda mucho,como proveer de feedback al usuario de como fue la validación y en qué se equivocó.
+
+I've deleted ngress-nginx with a kubectl delete namespace ingress-nginx
+
+and ran kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-0.32.0/deploy/static/provider/cloud/deploy.yaml
+
+k get all es un buen comando para ver de un vistazo todo cual asinto
+
+Nota:puedo eliminar la certificación SSL en Postman(Secure Socket Layer)
+Parece que va a ver que ir repitiendo cada palabra que me salga mal en un archivo de texto hasta que mejore en esa palabra.
+
+				VIDEO 132 COMPLEXITY AROUND ERRORS
+
+Tenemos un problema con el objeto que devolvemos como error.Estamos en una arquitectura de microservicios y cada servicio podría estar en un lenguaje diferente,asi que devolver esto simplemente no es válido:
+[
+    {
+       "value": "testtest.com",
+       "msg": "Email must be valid",
+       "param": "email",
+       "location": "body"
+    }
+] Si el servicio está en Ruby on Rails o Java Spring tendrá una estructura totalmente diferente.Esto es un problema tremendo,asi que hay que asegurarse que cada servicio manda un error con la misma estructura(puede ser un array de objetos,como este caso, o un simple objeto,.. pero cada servicio debe mandar el feedback en esa estructura de forma consistente)
+En este curso pasaremos mucho tiempo dando consistencia al código,aunque parezca complicado va a ser más fácil de lo que parece
+
+			VIDEO 133 OTHER SOURCES OF ERRORS
+
+No sólo va a lanzar un error express-validator si no que hay muchas más fuentes que podrían lanzar un error.Todos estos escenarios también deben proveer la misma estructura consistente en su feedback de retorno al usuario.
+Por ejemplo si el email existe esto no es trabajo de express-validator,también la base de datos podría estar caida justo cuando queremos guardar un usuario.
+Necesitamos capturar todos estos errores y además de forma consistente.
+
+			VIDEO 134 HANDLING ERRORS
+
+Zero conditionals: used to refer to general truths,scientific facts and the predicable results of particular actions:
+If+Present simple, present simple:
+If you heat water enough, it boils.
+
+First conditionals: used when we talk about something that is likely to happen in the future after a specific set of circunstances(sucederá si se cumple,ojo,en el futuro)
+if+present,,will+infinitive(puede ser might o would también)
+If I go shopping,I'll buy something
+Puede ser un futuro o un might,would,etc...creo; pero no un presente simple,es lo que le distingue del Zero.
+
+Second conditionals: refer to an imagined present result of a unlikely or impossible present condition(la condicion llega hasta el presente, y el resultado será en el presente también)
+If + past simple, would+infinitive
+If I had the money, I would travel around the world.
+
+Third conditional: refer to an imagined past result of something that didn't happen in the past.(la condición se dió en el pasado y NO sucedió lo que habria sucedido si se hubiera cumplido)
+If+past perfect, would + have + past participle
+If I had known her, I would have saluted her.
+Pregunta por los verb tenses.
+
+Conditionals always have two clauses,the if clause and the result clause.If the if clause is first,the result clause is separated by a comma.
+There is no comma if the result clause comes first.<- like this phrase
+
+Seguir con los mixeds mañana.
+
+En los dos últimos videos hemos llegado a la conclusión de que necesitamos dos cosas:
+1ª: debemos tener una estructura consistente en la respuesta de TODOS los servidores,
+2ª: pueden ir mal un millón de cosas,no sólo la validación.Cada una de ellas necesita ser manejada consistentemente también
+
+Las soluciones que implementaremos serán:
+1ª: escribir un middleware para procesar los errores,dandole una estructura consistente.Adios al problema 1
+2ª: asegurarnos que capturamos el máximo de errores usando un mecanismo de tratamiento de errores de Express(usando next)
+En Resumen, cualquier servicio deberá mandar los datos en la misma estructura,asi dará igual el lenguaje usado.
+
+			VIDEO 135 EMPEZANDO CON EL MIDDLEWARE
+
+Dentro de src creo un folder 'middlewares' y un file 'error-handler.ts' port { NextFunction, Request, Response } from "express";
+
+// el objetivo principal es devolver consistentemente la respuesta en una estructura idéntica 
+export const errorHandler = (
+   err:Error,
+   req:Request,
+   res:Response,
+   next:NextFunction 
+   ) => {
+      console.log('Something went wrong',err)
+      res.status(400).send({
+        message: 'Something went wrong'
+      });
+  };
+Ahora hay que conectarlo a la aplicación.Para ello lo importo en el index y lo uso como middleware:
+app.user(errorHandler) <- y listo
+Para personalizar los errores y que pueda ver lo que le paso por argumento a cada error vamos a devolver el mensaje asi:
+
+ throw new Error('Invalid email or password'); <- si quiero ver esto debo devolver esto:
+   res.status(400).send({
+      message: err.message
+      });
+  }; HAY QUE DEVOLVER LA PROPIEDAD MESSAGE.,
+
+			VIDEO 136 COMMUNICATING MUCH MORE INFO
+
+Nota: parece que puede cambiar el contexto al parar el contenedor de minikube:
+>kubectl config get-contexts <- para ver a donde apunta kubectl
+>kubectl confit use-context contextName <- cambiarlo si es necesario
+>kubectl get all <- para ver todo de un plumazo
+>kubectl config get-clusters <- otro comando importantisimo para ver los clusters sobre los que tiene visión el contexto.
+
+Acabamos de ver como devolver más información con la propiedad message de la clase Error,sin embargo no es suficiente.Deberia devolver mucha más información.Idealmente debo devolver un Objeto Error y no un mísero string como ahora.En JS podria ser muy fácil:
+error.reasons=errors.array(); <- reasons es una propiedad on the fly!
+Sin embargo en TS no puedo declarar propiedades on the fly.
+En resumen:está claro que debemos comunicar mucha más información desde el Request Handler al Error Handler.
+
+			VIDEO 137 CREATING CLASSES IN TS FOR ERRORS
+
+Vamos a coger el objeto Error y separarlo en dos clases(RequestValidationError y DatabaseConnectionError)
+El primero tendrá lugar cuando haya un error en la contraseña o email,etc mientras que el otro se refiere a la base de datos
+El truco está en crear una clase,ya que así la puedo añadir las propiedades que quiera.
+Fijate como crea las propiedades:
+
+export class RequestValidationError extends Error {
+   constructor(private errors: ValidationError[]){
+		super(); <- siempre que se hereda de una clase base hay que llaamarla en el constructor	
+      }
+	  }
+
+Eso es equivalente a hacer:
+export class RequestValidationError extends Error {
+   errors:ValidationError[];
+   constructor(errors: ValidationError[]){
+		this.errors=errors
+      }
+	  }
+La segunda clase es posible que no necesite extender de Error:
+export class DatabaseConnectionError extends Error{
+   reason = 'Error connecting to database';
+
+    constructor(){
+      super();
+      Object.setPrototypeOf(this,DatabaseConnectionError.prototype);   
+	     }
+ }
+Ahora las importo en el signup.ts y en vez de lanzar un error genérico lanzo mi propio error:
+import { RequestValidationError } from '../errors/request-validation-error';
+import { DatabaseConnectionError } from '../errors/database-connection-error';  
+Y los lanzo cuando lo necesite
+ if (!errors.isEmpty()){
+    throw new RequestValidationError(errors.array());
+   }
+
+Whenever we create a new error instance using RequestValidationError, it actually acts as an instance of Error no RequestValidationError when compiling down to es5. So for every instance created using RequestValidationError we set its prototype explicitly using Object.setPrototypeOf() to its actual class
+Para cada instancia creada con mi clase debo fijar explicitamente el prototipo si uso es5.
+
+			VIDEO 140 CONVERTING ERRORS TO RESPONSES
+
+Quito el console log y devuelvo algo en condiciones.Nos ayudaremos del objeto ValidationError que ya nos devuelve propiedades como el field,el msg del error,etc...:
+
+if(err instanceof RequestValidationError){
+  const formattedErrors = err.errors.map( error => {
+    return { message: error.msg,field: error.param};
+    })
+ return res.status(400).send({ errors:formattedErrors });
+ }
+Ahora cada error irá acompañado de su mensaje y el campo que lo disparó.IMPORTANTE: un error 400 indica BadRequest o mala petición,fijate que aquí si es el caso,pues enviar un email mal es una mala petición.Sin embargo,esto no va a ser así para el error de la conexión(mejor un 50x).
+
+			VIDEO 141 & 142 CUSTOM ERRORS
+
+Vamos a refactorizar un poco el código,ya que hay algo de código repetitivo:
+
+if (err instanceof DatabaseConnectionError) {
+     return res.status(err.statusCode).send({errors: err.serializeErrors()  });
+	   } <- compruebo si el error es de un tipo concreto y llamo a una función normalizadora
+
+Aun nos queda comprobar que realmente esta clase implemente esta función,deberia comprobar todo esto con TS.Tenemos dos opciones,la primera sería crear una interface y que ambas clases implementen esta interface:
+
+interface CustomError {
+  statusCode:number;
+  serializeErrors():{
+    message:string;
+    field?:string;
+  }[]
+ }
+Fijate como los tipos van en minúscula en Typescript.Para indicar que una funcion devuelve un array de objetos:
+saludar():{prop1:string;prop2:number;}[]
+
+Ahora que la implementen:
+
+export class RequestValidationError extends Error implements CustomError <- ya no podré escribir una propiedad mál como por ejemplo statuscode en vez de statusCode.Sin embargo,aunque es una opción muy válida vamos a tomar una aproximación ligeramente diferente con una clase abstracta,pues al no poder instanciarse es incluso un poco más correcto usarla.Tendremos un código más limpio dentro de error-handler.ts también.
+
+				VIDEO 143 ABSTRACT CLASS CUSTOMERROR
+
+Puedo crear una clase abstracta en Typescript fácil:
+
+export abstract class CustomError extends Error {
+  abstract statusCode:number; <- cualquier propiedad abstracta debe ser implementada en la subclase
+    constructor(message:string){
+      super(message);
+      Object.setPrototypeOf(this,CustomError.prototype);
+    }
+	abstract serializeErrors():{message:string;field?:string}[];
+}
+
+Debo crear un constructor porque cuando compile de vuelta a ECMA2015 esta clase va a fijar su prototipo a la Clase Error,parece que hay que moverlo a mano.
+También cada clase va a tener que mandar un mensaje a través de super(message).Este mensaje llegará desde las subclases hasta la abstracta y está se lo manda a la built-in Error,otorgandome la funcionalidad de mandar un pequeño string personalizado.
+
+De nuevo realizar esto permitirá a React saber como parsear cualquier tipo de error,sin importar el lenguaje del servicio.
+
+			VIDEO 144 CREATING NEW ERRORS
+
+Vamos a crear un nuevo archivo para implementar un NotFoundError,para cuando el usuario navege a una ruta que no exista:
+import { CustomError } from './custom-error';
+
+export class NotFoundError extends CustomError {
+
+   statusCode:number=404;
+
+     constructor(){
+       super('Route not found');
+       Object.setPrototypeOf(this, NotFoundError.prototype);
+    }
+   serializeErrors(){
+     return [{message:'Not Found'}]
+     };
+}
+Implementar un nuevo error es tan fácil como crear una clase con las propiedades que debe desarrollar desde la clase abstracta anterior.
+
+En el index.ts ...
+import { NotFoundError } from './errors/not-found-error';
+
+app.all('*', () => {
+   throw new NotFoundError();
+   }); <- si bien podria ser por GET parece que es aún más consistente usar all para que cubra todos los verbos posibles.
+
+Despite the catch-all '*' route, the NotFoundError is only activated on paths that match the ingress-srv service regular expression,  path: /api/users/?(.*) Otherwise,  default nginx 404 behavior is activated. <- IMPORTANTE
+
+				VIDEO 145 ASYNC ERROR HANDLING
+
+Parece que no hay forma de romper nuestra aplicación con una sola keyword,pero si que la hay.Si defino la anterior funcion como asincrona se quedará esperando por la promesa.
+Nota: declarar una función como asincrona inmediatamente la hace devolver su retorno como una promesa en el futuro.La promesa debe ser resuelta.
+
+Express no tiene ningun problema en capturar errores en código síncrono:
+app.get('/',function (req,res){
+  throw new Error("BROKEN"); <- Express capturará este error sin problema
+
+Sin embargo,si es código asíncrono,va a necesitar que se lo indiques en la zona del bloqueo(del next)y usar un middleware con bloqueo,obviamente:
+app.get("/", function (req,res,next){
+ fs.readFile("route/to/file",function(err,data){
+		if(err){
+    		next(error) <- Paso el error a Express,si no no lo sabrá capturar
+        }else{
+    	  res.send(data);
+		}
+}
+En nuestro caso simplemente tenemos que hacer esto:
+app.all('*', async (req,res,next) => {
+      next(new NotFoundError());
+ }); 
+ Obviamente hay que pasarle parámetros ya al middleware.
+ En vez de usar next Stephen cree que es mejor opción seguir como estabamos con el throw y bajarnos un pequeño paquete que va a cambiar como Express interpreta los middlewares en los routers.
+ El módulo npm se llama express-async-errors:
+ https://www.npmjs.com/package/express-async-errors
+ lo único que hay que hacer es importarlo justo después de importar Express.Este módulo hará a Express escuchar por errores en código asíncrono también,respetando el resto de Express.
+ import express from 'express';
+ import 'express-async-errors'; <- simplemente lo requiero
+ Esto no sólo arreglará los router handlers del archivo index.ts donde lo importé sino en todo el proyecto(IMPORTANTE)
+
+		 MÓDULO 8 GESTIÓN DE LA BASE DE DATOS Y SU MODELADO
+
+		 VIDEO 146 CREANDO BASES DE DATOS EN KUBERNETES
+
+Tal como ya hemos acordado vamos a usar MongoDB como gestor asi que tengo que instalar mongoose(npm i mongoose dentro de la raiz del proyecto node).
+¿Como voy a crear una instancia de MongoDB?Voy a correr MongoDb dentro de un pod(con docker¿?).Recuerda que no creamos los pods directamente,sino que se crean a través de un Deployment.Adicionalmente,para poder comunicarme con este pod,tendré que crear un servicio de tipo ClusterIP.
+
+Asi pues voy al folder infra/k8s y creo el archivo 'auth-mongo-depl.yaml'.El orden es así,porque es para el servicio 'auth',el tipo de database es 'mongo' y es un deployment.Dentro lo defino asin:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-mongo-depl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+	  app: auth-mongo **
+	template:
+	  metadata:
+	    labels:
+		  app: auth-mongo **
+	  spec:
+	    containers:
+		  - name: auth-mongo
+		    image: mongo
+--- 
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-mongo-srv
+spec:
+  selector:
+    app: auth-mongo
+  ports:
+    - name: db * este nombre no es realmente importante segun Sthepen
+	  protocol: TCP
+	  port: 27017
+	  targetPort: 27017
+
+**De nuevo labels: auth-mongo es la label que se le aplicará al pod y el selector es el nombre del pod que tiene que buscar para hacer el deployment.Es por ello que coinciden 		
+
+Notas: ¿Porque no metemos la base de datos en el pod con el servicio auth?Porque si quisiera escalar el servicio auth también voy a replicar la base de datos,asi que tengo que separarlos por motivos de escalabilidad en el futuro a pesar de que están intrinsecamente ligados.
+Databases should NOT be created as Deployment; they should be created as StatefulSet.
+
+Your cluster needs a PersistentVolume defined, and that StatefulSet needs to have a PersistentVolumeClaim on that PersistentVolume.
+All database data needs to be stored on the PersistentVolume. (For databases, this is generally some type of block storage). Horizontal scaling is a pain because you will have to replicate (mirror) data and keep it in sync. There are a number of pitfalls here.
+I love Stephen and his courses, but this is not good practice to deploy databases as a k8s Deployment.
+
+If you're not seeing skaffold tracking changes in your terminal just write this command $ skaffold dev --trigger polling .
+Resumen: parece que no debería ser un objeto Deployment la base de datos.Deberian crearse como StatefulSets.El cluster necesita un PersistentVolume definido y ese objeto StatefulSet(que será un gestor DDBB) necesita tener un PersistentVolumeClain en ese PersistentVolume.Investigar más sobre esto.Recuerda usar 'skaffold dev --trigger polling' si no autorefresca el cluster skaffold...
+
+				VIDEO 147 CONNECTING TO MONGODB
+
+Debo tener en cuenta varios aspectos,el más importante es que si borro o reinicio el pod ejecutando MongoDB,¡perderé todos los datos!
+Arreglaremos esto más adelante,además de entender porque estaré perdiendo todos los datos hasta entonces.De momento vamos a conectar desde el index.ts a Mongo:
+
+Fijate que puede que me falten los tipos(npm i @types/mongoose)
+import mongoose from 'mongoose';
+
+Conectar a una instancia local es muy fácil,pero,¿cómo conectarse a otro pod?Para ello tengo que usar el servicio ClusterIP,en realidad su nombre,ya que va a hacer de dominio:
+
+---
+apiVersion: v1
+kind: Service
+metadata: 
+  name: auth-mongo-srv  <- apunto a este name/domain(no era ClusterIP¿?)
+
+const start= async () => {
+   try {
+     await mongoose.connect('mongodb://auth-mongo-srv:27017/auth',{
+         useNewUrlParser: true,
+         useUnifiedTopology: true,
+         useCreateIndex: true
+      });
+    } catch (error) {
+      console.error(error);
+    }
+												     
+   app.listen(3000,() => {
+    console.log('Auth service up on port 3000')
+    });
+}
+start(); <- recuerda que hay que llamarla 
+
+IMPORTANTE: las últimas versiones de Node permiten usar 'await' en el top level de la función:
+await mongoose.connect('mongodb://auth-mongo-srv:27017/aut',{})
+Sin embargo no lo usaremos en este curso.
+Nota: parece que nunca se persistió la data,para ello hay que usar PersistentVolumes(PV) <- Investigar como persistir esos datos.
+
+			VIDEO 148 UNDERSTANDING THE SIGNUP FLOW
+
+Va a haber un par de reglas que seguir al crear los usuarios en el archivo signup.ts;por ejemplo no puede haber dos emails idénticos,ni se pueden guardar las password sin encriptar.
+Al guardar un usuario,se supone que se ha logeado,con lo que hay que mandarle una cookie con el jwt o similar...
+La database 'auth' tendrá una colección users con un documento por cada usuario.
+
+			VIDEO 149 JOINING MONGOOSE AND TYPESCRIPT
+
+Puede ser un poco complicado juntar mongoose y typescript,pero vamos a hacerlo así.Recuerda que el Modelo es como una clase o molde que representa a toda la colección de usuarios.Es sobre este Modelo sobre el que ejecutaremos queries para buscar,guardar,etc...
+Un Documento también es una clase,pero representa a un único User.
+Tendremos problemas si no usamos parámetros de tipo:
+new User<>({}) <- habrá que crear una interfaz¿?
+
+			VIDEO 150 CREATING USER MODEL
+
+Crear un modelo es realmente fácil:
+import mongoose from "mongoose";
+
+const userSchema = new mongoose.Schema({
+  email: {
+     type: String,
+     required: true,
+   },
+  password: {
+     type: String,
+     required: true,
+   },
+});
+const User = mongoose.model('User',userSchema);
+Sin embargo,typescript no tiene ni idea de que es un User,podria crear uno asi:
+new User({
+  email:'dfsfs'
+  pas:4545
+  alfj: 'fksaflk' 
+}) 
+y typescript lo aceptaría.Debemos cambiar esto 
+
+			   VIDEO 151 TYPE CHECKING
+				
+Primero hay que crear la tipica interfaz de TS:
+
+interface UserAttrs {
+   email: string;
+   password: string;
+ }
+Ahora vamos a hacer una pequeña trampa:
+
+const buildUser = (attrs: UserAttrs) => {
+  return new User(attrs);
+  };
+
+  export { User,buildUser };
+No usaremos User,sino buildUser para crear un usuario.En el siguiente video veré otra forma con propiedades estáticas(mejor usar la aproximación que ya usé en la app de React).
+
+			VIDEO 152 ADDING STATIC PROPERTIES TO A MODEL
+
+Agregar una propiedad estática a un Modelo de mongoose es realmente fácil,el problema reside en que TS no lo entiende:
+
+userSchema.statics.build= (attrs: UserAttrs) => {
+  return new User(attrs);
+  }  <- simplemente se usa schemaName.statics.newStaticProperty (puede ser una función)
+
+			VIDEO 153 DEFINING EXTRA PROPERTIES   
+
+Al final Stephen ha dejado todo perfectamente organizado.Nunca debí dudar de semejante asinto,su sabiduría es total:
+
+import {Schema,model,Document,Model} from "mongoose";
+
+// Interfaz que describe las propiedades que son requeridas para crear un nuevo User
+interface UserAttrs {
+   email: string;
+   password: string;
+ }
+
+ //Interfaz para un único User
+interface UserDoc extends Document{
+    email: string;
+    password: string;
+ }
+
+ // Interfaz que describe las propiedades que un UserModel tiene
+ // Esto especifica las propiedades que tiene que tener toda la coleccion,a diferenecia del Document que es para un Documento
+interface UserModel extends Model<UserDoc> {
+    build(attrs: UserAttrs):UserDoc;
+ }
+			  
+const userSchema = new Schema<UserDoc>({
+   email: {
+     type: String,
+     required: true,
+   },
+   password: {
+     type: String,
+     required: true,
+  },
+ });
+
+ userSchema.statics.build = (attrs: UserAttrs) => {
+   return new User(attrs);
+}; 
+
+const User = model<UserDoc,UserModel>('User',userSchema);
+const user = User.build({
+  email:"test@test.com",
+   password:"2321"
+	}) <- con esta prueba puedo ver que el tipado esta perfecto,parece que lo haya echo yo y todo -_-
+export { User};
+
+Si quisiera añadir una nueva propiedad hay que añadirla al Document,ya que es la representación de un User.
+
+				VIDEO 154 ANGLE BRACKETS 
+
+The UserDoc represents the type that is returned when using the model to create a single document or instance (e.g. when calling User.build).
+
+UserModel represents the type of the entire collection, or Model, that is returned when calling mongoose.model('User', userSchema).
+
+Here, we passed UserModel because we modified the Mongoose library's model when we added the "build" function. Otherwise, it would not have been needed. For example, I used the solution that was suggested in the previous video's comments.
+
+With that solution we didn't need to use the build function, so there was no need to modify the Mongoose Model, and thus no need to create and pass in UserModel.
+Resumen:el UserModel representa toda la colección,el UserDoc representa un documento/usuario.
+
+				VIDEO 155 USER CREATION
+
+De momento no vamos a encriptar la password,haremos algo tan sencillo como simplemente chequear que el email ya exista(con un findOne es suficiente):
+    //Hay que comprobar si el email existe ya 
+    const { email,password } = req.body;
+    const existingUser = await User.findOne({ email: email});
+				      
+    if(existingUser){
+       console.log('Email in use');
+       return res.send({});
+    } 
+
+    const user= User.build({
+        email: email,
+        password: password
+    })
+    await user.save();
+    res.status(201).send(user);
+Obviamente nos falta mucho,debo encriptar la password,además tampoco es buena idea devolver todo el user,pues también va la password alli.
+Intentar validarme desde Windows,a ver si consigo cambiar el contexto de kubectl.
+
+Recuerda crear un virtual host en el w10 del acer apuntando a la IP del load balancer.
+
+				VIDEO 156 PROPER ERROR HANDLING
+				
+Vamos a lanzar otro error custom cuando el email ya exista.Haremos una clase de forma similar a las creadas anteriormente:
+
+import { CustomError } from './custom-error';
+
+export class BadRequestError extends CustomError {
+    statusCode  = 400;
+
+    constructor(public message: string ) {
+        super(message);
+        Object.setPrototypeOf(this,BadRequestError.prototype);
+    }
+
+    serializeErrors()
+    {
+        return [{ message: this.message}]
+    }
+}				
+
+				VIDEO 158-159 ENCRYPTING & ADDING THE PASSWORD
+					
+Nota: nodemon is extremelly slow,  i'm trying to use the "--poll" flag and it's working so far
+
+"scripts": {
+    "start": "ts-node-dev --poll src/index.ts"
+} <- investigar la veracidad de tan magna afirmación.
+
+Hasta ahora hemos guardado la password como texto,esto simplemente no es válido.Hay que encriptarla.Se recomienda hacerla en el Modelo.Nosotros lo haremos en un archivo externo,tomando una aproximación diferente.
+
+>>git config --global user.name "name" <- para fijar un nombre en el equipo.Parece que hacer un clone lo deja apuntando al proyecto clonado.Importante,confirmar esto.
+
+import { scrypt, randomBytes } from 'crypto';
+import { promisify } from 'util';
+
+const scryptAsync = promisify(scrypt);
+
+
+export class Password {
+    static async toHash(password: string){
+       const salt = randomBytes(8).toString('hex');    
+       const buf = (await scryptAsync(password,salt,64)) as Buffer;
+
+       return `${buf.toString('hex')}.${salt}`;
+   }
+Realmente encriptar la password se puede hacer incluso con librerias del propio core de Node,de forma sencilla
+
+				VIDEO 160 COMPARING PASSWORDS
+
+Para comparar haremos algo parecido(recuerda que son métodos estáticos asíncronos):
+    static async compare(storedPassword: string, suppliedPassword: string){
+    const [hashedPassword,salt] = storedPassword.split('.');       
+    const buf = (await scryptAsync(hashedPassword,salt,64)) as Buffer;
+
+   return buf.toString('hex') === hashedPassword;
+   } <- ahora encriptaremos las password ya desde el Modelo,es decir,desde el momento de la creación del usuario.
+
+		   VIDEO 161 MONGOOSE PRE-SAVE HOOKS
+
+Mongoose proporciona varios métodos built-in,asi que vamos a usar schema.pre('save') para asegurarnos que antes del guardado se llama a nuestro método estático encriptador
+
+Nota: mongoose no puede marcar funciones como asincronas,para poder manejar código asincrono con  mongoose se nos va a proporcionar la propiedad 'done' de forma similar a como funciona un middleware bloqueante.Somos nosotros como programadores responsables de llamar al metodo cuando el código lo requiera:
+
+NOTA TERRIBLEMENTE IMPORTANTE: es imperativo usar la keyword 'function'  en vez de una arrow function por motivos del contexto,asi podré referirme al usuario actual que está siendo guardado con 'this' mientras que con una arrow function no lo tendría en el scope:
+
+userSchema.pre('save',async function(done){
+  this <- this es el usuario actual, no se usan arrow functions
+  await bla bla bla
+  done(); <- hay que llamar a done,de forma similar a next(); asinto
+});
+
+1º: //usar 'function' me permite tener con 'this' scope sobre el current user que está siendo guardado.Con una arrow function subiria el contexto y perdería visión sobre él
+
+userSchema.pre('save',async function(done){
+
+  2º://al usuario se le suele dar la opcion de cambiar el email,en este caso no es necesario cambiar la password.Por eso sólo lo hacemos si se modifica la password.Fijate que crear un usuario para mongoose significa modificar una password también y entrará por esta lógica
+
+    if(this.isModified('password')){
+      //fijate como accedo con this.get(prop)
+      const hashed = await Password.toHash( this.get('password'));
+	  this.set('password',hashed);
+			  }
+      done(); //finalizo la asincronía
+	}); 
+
+Lo último que nos quedaría sería enviarle el token,ya que consideramos que el usuario además está logeado ya.De momento lo dejaremos para más adelante,hay que decidir que significará estar logeado previamente.	

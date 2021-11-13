@@ -1,0 +1,200 @@
+							APPENDIX A
+
+Docker intenta facilitar las instalaciones de software.Si quiero usar redis sólo tendría que ejecutar esto:
+>docker run --ti redis
+
+		ECOSISTEMA DOCKER(CLIENT-SERVER/DAEMON-MACHINE-ENGINE...)
+
+Docker es todo un ecosistema,está formado por Docker Client Docker Server(el Docker Server es el Docker Daemon), Docker Images,Docker Machine,...
+
+				IMAGE & CONTAINER
+
+Una Image es un single file con todo lo necesario para ejecutar un programa
+Un container es una instancia de una imagen.Ejecuta un programa.
+
+Recuerda que el Docker Client en realidad no hace nada,hasta que se comunica con el Docker Server/Daemon.Es el Daemon el que es responsable de crear imagenes,ejecutar contenedores,subir imagenes,...El cliente solo vale para insertar comandos
+
+Recuerda que: una imagen es un archivo con todo lo necesario para ejecutar un programa en específico.El docker server y daemon son lo mismo.El Docker client es la cli.Un contenedor es una instancia de una imagen 
+
+			517	CAPA INTERMEDIA LLAMADA KERNEL
+
+Si trato de entender esto a nivel de hardware los programas como Chrome,la Terminal,Spotify o NodeJS hacen peticiones al sistema y es mediante el Kernel que se comunican con la CPU,la Memory o el Hard Disk(el Kernel hace de intermediario entre el software y el hardware)Las peticiones se hacen a través de 'system calls' o llamadas al sistema. 
+
+						NAMESPACING
+
+Imagina por un momento que chrome pide Python 2 a través del kernel al Hard Drive mientras que Node pide un Python3.Es a través del namespacing que se puede tener ambos
+El proceso de segmentar un recurso basandose en el proceso que lo está pidiendo es conocido como namespacing.
+Con el namespacing se nos permite aislar recursos por proceso(o grupo de procesos)
+El namespacing no se usa sólo para hardware sino que se usa también con el software.Por ejemplo podriamos tener un proceso que restringiera el área de un disco duro, o los dispositivos de red disponibles,o la habilidad de ver otros procesos(también es namespacing eso)
+
+Muy relacionado con el namespacing están los grupos de control.Un grupo de control puede limitar la cantidad de recursos usados por proceso.
+
+						CONTAINER
+
+El conjunto de proceso + system call + kernel + hardware es lo que se llama Container.Un Container realmente es un proceso o grupo de procesos que tiene un grupo de recursos asignados especificamente a él. 
+En un Container estará algun proceso 'running',además de un kernel,y una porción del hardware necesario para ejecutarse(HardDrive,NetWork,RAM y CPU)Ver imagen
+
+Pero como puede una imagen entonces desembocar en esto tan complicado.Imagina una imagen con Chrome y Python.Realmente una imagen es un FS Snapshot(una captura del File System,como un copy-paste de un conjunto de directorios y archivos.También tendrá un StartUp Command especifico.
+
+El proceso será:el kernel asegura un pedazo del HD del host y lo coge para ese contenedor.Fijate que en cuanto haga eso ya tendré un Chrome y un Python en el HD del contenedor.Recuerda que cada imagen tiene un comando de arranque asignado,en este caso sería 'run chrome', asi que el segundo paso sería arrancar el chrome(recuerda que un contenedor es un proceso,asi que el proceso sería ese chrome,es decir,algo debe arrancar como proceso en un contenedor,un mysql,un python...)
+
+		518 LINUX VIRTUAL MACHINE
+
+Importante:esta característica de namespacing y control groups no está incluida por defecto en algunos sistemas operativos.Es propia de Linux(no de Windows o MacOS)
+Asi pues,como es que puedo ejecutar Docker en W10 o Mac.Recuerda que cada contenedor tiene un kernel linux ,bien, pues en el sistema operativo de turno tendré que tener un Linux Virtual Machine,una VM Linux.
+Esto lo puedo ver haciendo un docker --version y buscando en el Docker Server/Daemon ya que la OS/Arch va a ser un linux esté donde este porque es la Linux VM la que ejecuta Docker en cualquier SO
+
+527 SOBREESCRIBIENDO EL COMANDO POR DEFECTO DE ARRANQUE DE UNA IMAGEN
+
+Recuerda que cada contenedor tiene una orden de arranque,un comando ya preasignado que ejecutará.
+Para sobreescribir ese comando se le puede pasar un argumento extra a docker run:
+docker run <image> <overrideCommand> 
+>docker run busybox echo hi there
+>docker run busybox ls <- puedo hacer un ls si lo necesito
+
+No todo contenedor va a ser capaz de ejecutar un ls o un echo,el contenedor debe ser capaz de ejecutar ese argumento overrideCommand.
+
+			530 LISTING RUNNING CONTAINERS
+
+Docker ps lista todos los contenedores activos en mi sistema.
+Con la flag -a o --all listará todos los contenedores que alguna vez he arrancado.Puedo ver cosas como el STATUS o el name.Es un comando básico.
+
+				531 CONTAINER LIFECYCLE
+
+PRimero se crea el contenedor con una imagen ,despues se arranca
+
+Docker create <image><- creación de un contenedor
+docker start <container>
+>docker create hello-world
+d673d9dcc64bfd52711dc3c156fe5eb4bd042f4f1b04d8f08403a3f589b7f65a
+
+>docker start -a d673d9dcc64bfd52711dc3c156fe5eb4bd042f4f1b04d8f08403a3f589b7f65a (-a de attach para ver el output,es una flag necesaria)
+
+Fijate que dokcer run por defecto ya muestra el output por consola,a diferencia de docker start,que necesita el -a.
+			
+			VIDEO 532 RESTARTING STOPPED CONTAINERS
+
+Aun cuando un contenedor tenga el estado de Exited puedo rearrancarlo.Para arrancarlo de nuevo puedo usar docker start -a containerId
+
+				VIDEO 533 REMOVING STOPPED CONTAINERS
+
+Los contenedores parados aún ocupan recursos en mis sistema.Es una buena idea borrarlos.
+Puedo usar docker system prune para borrar contenedores,networks,etc..,
+o borrarlos uno por uno con docker rm | rmi para las imagenes.
+
+				VIDEO 534 RETRIEVING OUTPUTS LOGS
+
+Para sacar los logs de un contenedor puedo usar el comando docker log <containerId>.Puede ser un contenedor parado,no tiene porque estar activo
+Este comando no reiniciará el comando,solo saca el outputs de los logs.
+
+				VIDEO 535 STOPPING CONTAINERS
+
+Para parar un contenedor puedo usar docker stop <containerId> o docker kill <containerId>.Ambos pararán el contenedor,pero la señal que envian al contenedor para que pare es diferente.
+Docker stop manda una SIGTERM que es menos agresiva y permite realizar operaciones de limpieza,desconexión,etc,mientras hace el shutdown
+Docker kill mandará una SIGKILL la cual es totalmente agresiva y parará el contenedor ipso facto.
+Sólo se recomienda usar docker kill si hay problemas y docker stop falla.(puedo ver las diferencias con docker run busybox ping google.com)
+
+			VIDEO 536 MULTI-COMMAND CONTAINERS 
+
+Usar por ejemplo la base de datos redis implica usar redis-server y despues redis-cli,esto sin usar docker,claro.
+>redis-server(tengo la unit enabled)
+>redis-cli
+127.0.0.1:6379> ya puedo usar la base de datos de mi sistema operativo 
+
+Pero para usar redis como un contenedor y despues entrar por cli voy a necesitar mas comandos que sólo el run o start.
+Voy a necesitar docker exec -ti <containerId> <comand>
+>docker run redis <- arranco el server
+fkdfkl54j5lk4
+>docker exec -ti fkdfkl54j5lk4 redis-cli
+
+NOTA: la -i de interactive lo que hace es atar mi terminal actual al stdin del contenedor.
+
+			540 SHELL ACCESS TO A CONTAINER
+
+Probablemente el comando que más use será docker exec -ti <containerId> sh | bash |/bin/bash.
+El contenedor debe estar activo. zsh es de mac asi que no funcionará igual que powershell
+Si bien también podria usar docker run -it <imagen> sh esto hará que no se ejecute el comando por defecto que tenia ese contenedor asignado.
+
+   VIDEO 543 CREATING DOCKER IMAGES
+
+Un Dockerfile es una configuración de como un contenedor debe comportarse.
+El código que escriba en él siempre se ejecutará secuencialmente
+
+
+---> fc60771eaa08
+Successfully Built fc60771eaa08
+Now, with Buildkit, the final step would say:
+=> => exporting layers                                                 0.0s => => writing image sha256:ee59c34ada9890ca09145cc88ccb25d32b677fc3b61e921  0.0s
+ 
+Both fc60771eaa08 and ee59c34ada9890ca09145cc88ccb25d32b677fc3b61e921 are the resulting image ID's that you would use to run a container.
+
+#Paso 1 usar una imagen existente de algun tipo:
+FROM alpine
+
+#Paso dos descargar,instalar dependencias,ejecutar comandos
+RUN apk add --update redis
+
+#Paso 3 definir el comando por defecto que debe arrancar el container
+CMD ["redis-server"]
+* Fijate como puedo crear una imagen de cualquier cosa,tio,me bajo un ubuntu y le instalo algo.
+
+IMPORTANTE: La imagen Base es el primer paso,ya que es la que proporcionará el sistema operativo(en nuestro último caso usamos alpine).
+Alpine viene con el apk como interfaz-cli.cualquier alpine que use tendré que usar apk para interactuar con ese Sistema Operativo.
+
+NOTA: cada linea de un Dockerfile veré un STEP 1 | 2 .. por consola.Como he creado una imagen con 3 comandos veré 3 STEPS.
+ 
+NOTA: veré también contenedores intermedios.Docker crea contenedores intermedios(excepto para el STEP 1).Al ejecutar el paso 2 crea un contenedor en memoria con el resultado del paso1 e intenta realizar la accion de ese paso.
+Cuando termina la accion 2 remueve ese contenedor temporal(pero Docker toma una snapshot de ese contenedor,de su FileSystem).Con esa snapshot va al paso 3 y de nuevo crea un contenedor temporal,opera y lo elimina,sacando la snapshot antes de ello.
+Al final mete esa snapshot final en un contenedor que me entrega.Asi que crear un contenedor significa crear varios contenedores temporales(y un contenedor siempre se basa en una imagen) y uno final.
+El proceso pues crea contenedores e imagenes temporales por cada paso a excepción del primero.
+
+STEP 3 CMD["..."]
+--->Running in e4j54k45j
+---aqui hará lo que fuera necesario----
+Removing intermediate container e4j54k45j.
+
+IMPORTANTE: todas las imagenes base llevan un SO.Aunque use node tendráun alpine o algo,es como está montado esto.
+
+					VIDEO 550 REBUILD WITH CACHE
+
+Recordando que cada paso crea una imagen/contenedor temporal en la construcción de,valga la redundancia,una imagen Docker Engine es tremendamente eficiente.
+Cada vez que pueda usará la caché de imagenes/contenedores('using cache') si no hay cambios en cada layer(linea) de un Dockerfile.
+
+					VIDEO 551 TAGGING AN IMAGE
+
+Dado que Stephen no taggeó la imagen en el build anterior (solo hizo docker build .) tiene que poner el Id para ejecutar el contenedor:
+>docker run 355hk45kjh45jkh <- esto no es nada eficiente.
+Para evitar esto siempre se tagea el build:
+>docker build -t <dockerId>/image:version . <- acuerdate del path
+>docker build -t stephengrider/redis:latest . <- el '.' hace algo,si,asinto
+
+			VIDEO 553 MANUAL IMAGE GENERATION WITH DOCKER COMMIT
+
+En docker puedo crear una imagen de un punto concreto en el tiempo de un contenedor(podria preinstalar dependencias en un node,por ejemplo y hacer un commit en ese punto).Si bien no es algo muy usado es una feature que posee Docker:
+docker commit -c 'CMD ["redis-server"]' 3907566kdf4 <- el id del contenedor(de la ejecución)
+
+				VIDEO 557 ERRORES
+
+Desde cierta version(node15 y npm7) si no se proporciona un package.json en un container será creado automáticamente.
+Recuerda que un contenedor nace con una pequeña parte del hardware del anfitrión y lo que le pase en el from:
+FROM node:alpine
+COPY package.json . <- pero fijate que en ese hardware no tendré ningun archivo,tendré 0 archivos,luego tengo que pasarle cualquier archivo que necesite
+* Y fijate como cualquier contenedor tiene un sistema de ficheros vacio(excepto lo que pertenece al SO del contenedor!)Luego puedo copiar entre Sistemas de ficheros,crear carpetas,archivos,borrar,en resumen tengo todo un sistema de ficheros en cada contenedor.
+COPY ./ ./ <- las rutas siempre son la primera relativa a donde se hizo el docker build( a donde está el Dockerfile!) siempre tengo que tener en cuenta que el acceso a mi sistema de ficheros es desde el Dockerfile(o donde hice el build?)
+
+* Si quisiera copiar dos archivos que están en la raiz:
+COPY ./ ./
+
+Recuerda que los puertos de ese sistema operativo no son los del mio asi que siempre hay que hacer port-forwarding desde un contenedor a la maquina que anfitrione:
+docker run -p 8080:8080 
+Por último ,si creo una imagen sin un WORKDIR me creará todo en /home en el contenedor(o /root).Esto realmente no es una práctica.Lo mejor es crear un directorio de trabajo para la app que no sea el home o el punto de entrada.
+Se hace con la keyword WORKDIR( y recuerda que al crearlo también me cambio a él,y siempre puedo usar cualquier instrucción como  cd .. y la keyword RUN ).
+Fijate además que si yo llevará un directorio llamado /lib sin especificar un WORKDIR seguramente este directorio /lib va a sobreescribir al del sistema operativo.Realmente es una buena idea usar directorios de trabajo explícitos.
+*NOTA: declarar un WORKDIR no sólo afectará a los comandos que estén debajo de él en el Dockerfile(ya que tomarán ese path debido a que se cambió alli el sistema de ficheros) sino que también afecta a cualquier comando insertado con docker exec(ya que ejecutará ese comando en base al WORKDIR también):
+>docker exec -ti kfkl3k4j sh <- ahora entraré por ejemplo a /home/app en vez de a /root,entraré al WORKDIR si lo declaro
+
+En cuanto a rebuilds innecesarios imaginate que en el step 4 cambio una linea en el index.js y en el step 5 tengo un npm install.Yo no quiero hacer la reinstalación de todas las dependencias realmente,es algo innecesario.Para ello hay que tener en cuenta el orden de las lineas y ese COPY ./ ./ que acopla todo:
+COPY package*.json ./ 
+RUN npm install
+COPY ./ ./ < ahora ya puedo hacer cambios que mientras no haga cambios en un package.json no va a hacer el npm install(pues por un cambio no va a entrar a esa instrucción mientras no sea en el package.json).Realmente es importante distribuir y elegir bien las instrucciones. 
+

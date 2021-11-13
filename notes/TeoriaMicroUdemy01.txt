@@ -1,0 +1,1533 @@
+												MICROSERVICES BY STEPHEN
+
+Nota:los diagramas los subió a su GitHub en https://github.com/StephenGrider/microservices-casts/tree/master/diagrams
+All of the diagrams can be found here: https://github.com/StephenGrider/microservices-casts/tree/master/diagrams
+Download the xml files, then import them into app.diagrams.net
+
+Video 03
+Un servidor monolítico contiene el Routing,los middlewares, lógica de negocio y el acceso a la base de datos para implementar TODAS  las caracteristicas y funcionalidades de nuestra aplicación.
+
+Por otra parte,un microservicio contiene de nuevo el Routing,los middlewares,la lógica de negocio y el acceso a la base de datos para implementar UNA ÚNICA funcionalidad o característica de nuestra aplicación 
+
+Un microservicio deberá funcionar independiente de si el resto funcionen ,es un entorno aislado en si mismo con todo lo necesario para funcionar(concepto de 100%standalone)
+
+Video04
+Si bien pudiera parecer que crear un microservicio es fácil ya que el concepto ha sido sencillo,en realidad es bastante complejo y el 90% de loss problemas siempre es el mismo, y es la gestión/intercambio de datos entre servicios(la forma de guardar los datos en el propio microservicio y la forma en que se comunicarán esos datos con el resto de microservicio s.En este curso nos centraremos mucho en este problema
+
+Primeramente cada microservicio que necesite una bases de datos va a tener la suya propia,recordemos esto.
+Además,cada microservicio NUNCA PUEDE ACCEDER A LA BASE DE DATOS DE OTRO MICROSERVICIO	BAJO NINGUNA CIRCUNSTANCIA
+
+¿Porque usar un gestor de bases de datos por servicio?La razón fundamental es que queremos que cada servicio pueda correr independiente de los demás servicios.Adicionalmente algunos servicios podrían funcionar de forma más eficiente con un gestor en particular(sql vs nosql).De nuevo memoriza que cada servicio usará su propia base de datos si es que la necesita(es opcional)
+
+Usar una única base de datos haría que si ésta fallará fallarán todos los servicios(a contraposición de que sólo fallaría ese microservicio).Además escalar esa base de datos sería desafiante,ya que deberá servir su funcionalidad a todos los servicios.Sería mejor escalar solo las bases de datos que realmente necesitarán escalar
+
+Video05 Big Problems with Data
+En una aplicación tipo e-commerce con sólo tres funcionalidades,registrarse(sign up),listar productos y comprar productos veamos como quedaría en una aplicación monolítica ya que rapidámente se convertirá en un problema.
+Partimos de que la base de datos tendría tres colecciones o tablas:colección de Usuarios(para el registrarse),colección de Productos(para listarlos) y coleccion de Pedidos(para comprarlos)
+S quisiera tener un cuarto servicio que muestre los pedidos echos por un determinado usuario,está bien claro que este servicio necesita acceder a las tres colecciones pero hemos quedado en que un servicio no puede acceder a la base de datos de otro servicio y este servicio está accediendo a las tres.Esta es la razón por la que EL MANAGMENT DE LOS DATOS ENTRE SERVICIOS PUEDE SER MUY DESAFIANTE
+Veremos dos formas de que el servicio D pueda acceder a los datos en una arquitectura de microservicios
+
+Video06 Sync Communication between Services
+
+Acabamos de ver que incorporar un nuevo servicio en una arquitectura de microservicios puede ser muy engorroso.Hay dos estrategias generales para
+solucionar esto,asincronas y sincronas(estos dos términos no tienen nada que ver con async/sync de javascript).
+
+				COMUNICACIÓN SINCRONA
+Definición de una estrategia de comunicación síncrona:servicios comunicandose entre ellos con peticiones directas.Apliquemos esto al ejemplo anteriordonde un cuarto servicio pide información a los otros tres.La petición llegaría a ese servicio D pidiendo listar los pedidos de un determinado usuario.Este servicio hará una petición al servicio A pidiendo el usuario ya sea una petición HTTP o de otro tipo.Después hará otra petición al servicio B con los productos,otra al C con los pedidos,... las que necesite
+
+Este tipo de comunicación tiene algunas ventajas como:
+1-Sencillez
+2-El servicio D no necesita una base de datos
+Pero también introduce algunas desventajas como:
+1-Introduce una dependencia entre servicios(entre el D  y los otros tres)
+2-Por ello,si uno de esos servicios cae,el servicio D también caerá
+3-La petición va a ser tan rápida como la petición más lenta de todas( como un Promise.All)
+4-Puede introducir fácilmente otras dependencias(el servicio A quizá también haga otra petición a otro servicio Z,y éste otra petición a otro servico T,volviendose todo lento y complejo) 
+
+
+Video07 Based Event Communication
+
+En este video vamos ver el estilo de comunicación asíncrona.Veremos dos formas de abordarlo.
+Definición de una estrategia de comunicación asíncrona: los servicios se comunican entre ellos con eventos 
+
+En este video veremos una forma no muy buena de comunicación asíncrona.En el siguiente veremos otra mejor
+La idea general de comunicación asíncrona es que vamos a introducir en nuestra aplicación algo que sea accesible por todos los servicios y esté externalizado.Se le llama Event Bus.El propósito de este evento es manejar pequeñas notificaciones o eventos emitidos por los diferentes servicios.
+
+Son como pequeñas notas de algo que ha sucedido en un servicio o que tiene que suceder dentro de la aplicación.
+CADA SERVICIO ESTÁ CONECTADO A ESTE BUS DE EVENTOS.Una vez conectado cada servicio puede tanto recibir como emitir eventos.Notesé que tenemos un single point of failure ya que todo pasa por este bus de eventos(cuando se crea un bus de eventos siempre se dedica esfuerzo en que no crashee,que sea resiliente)
+
+Veamos el ejemplo anterior donde el servicio D pide una lista de los productos de un usuario.Ésta vez emitirá un evento(de tipo UserQuery,con una data donde va el id del user a consultar,por ejemplo el 1)Siempre pedimos el usuario ya que es buena práctica asegurarnos que primero existe ese usuario.Bien,el servicio A estará escuchando por eventos de tipo UserQuery y como se ha emitido uno lo escuchará y satisfacirá esa petición.Por ejemplo podría emitir un evento de tipo UserQueryResult y en la data enviar el ID y el nombre,apellido,etc.Esto lo mandará al bus
+El servicio D deberá estar configurado para recibir eventos de este tipo UserQueryResult y lógicamente al recibirlo mandará otro pidiendo los productos y así hasta completar lo que necesite
+
+ESTE TIPO DE COMUNICACIÓN EN REALIDAD NO SE USA MUCHO,YA QUE POSEE TODAS LAS DESVENTAJAS DE LA COMUNICACIÓN SINCRONA PERO ADEMÁS AGREGA MÁS:
+Ventajas de la comunicación por bus de eventos:
+1- Conceptualmente también sencillo de entender
+2-De nuevo el servicio D no necesita base de datos
+Pero como desventajas tiene:
+1-De nuevo inserta dependencias entre servicios
+2-De nuevo,si un servicio cae,caen los que dependan de él
+3-De nuevo,la petición será tan rápida como la más lenta del resto
+4-De nuevo,puede crecer sin control
+
+Video 08 A crazy way of storing Data
+
+Igual que el patrón database-per-service,esta segunda forma va a ser un poco extraña e ineficiente.De nuevo trataremos de implementar nuestro servicio D en la aplicación e-commerce existente
+
+Lo primero que haré es redefinir con más exactitud que es lo que quiero que haga ese sevicio D:
+-Dado el ID de un usuario,muestra el título y la imagen para cada producto que ese usuario haya ordenado comprar alguna vez.
+Una vez echo esto,se va a definir la estructura DDL de una database que pudiera satisfacer esto:
+Dos tablas,una con los campos ID titulo e imagen para el producto y otra con ID del usuario y products_id(un array de ids)(hemos dicho que no queremos nombre ni email ni nada)Ver imagen 06
+
+Si nos hicieramos la pregunta de si esta base de datos tiene la suficiente información para satisfacer al servicio D la respuesta es que si,realmente esos datos son lo único que necesita el servicio D.Pero,teniendo en cuenta que el servicio D no va a acceder a cuando se registre un nuevo usuario,se registre un nuevo producto o se haga un pedido tenemos que pensar como le pueden comunicar al servicio D los servicios A,B y C esto.
+
+Imaginemos que creamos dos productos nuevos.Bien, el servicio B los almacenará en su DDBB,pero SIMULTÁNEAMENTE(y esto es clave) va a emitir un evento.Este evento puede ser de tipo {type:producto creado,data:{id:1,title:"pants",image:"pants.jpg"}}.Lo emitirá hacia el bus de eventos,el cual lo mandará hacia cualquier servicio interesado
+Lo mismo pasará para una creación de usuario.El servicio A guardará en su base de datos el usuario y adicionalmente mandará un evento al bus con ese usuario para el servicio que pudiere estar interesado.Idem para el servicio C de creación de una orden de pedido.
+Si todos los servicios comunican lo que les sucede automáticamente el servicio D tiene todo lo necesario para crear su base de datos(asi que estará escuchando por inserts,deletes y updates)
+
+Hay varios problemas a la hora de afrontar esto(sacado de los comentarios):
+Crear el usuario y el evento deben ir en una acción única: este tipo de acciones van en una transación,o se crea el usuario y se emite el evento o no se hace nada
+Los datos están replicados:esto es inevitable,o bien se hace comunicación síncrona con lo que si cae un servicio caen los que dependan de él,además de que la petición a ese servicio puede demorar,o bien se replican los datos para alimentar on his own a ese servicio dependiente.
+Nota: si un servicio cae,al levantarse puede recuperar los datos de ese bus de eventos.Recuerda que el bus de eventos es un single point of failure
+Para solucionar este único punto de fallo se usa el NATs clustering(replicación de nodos,contenedores,etc...).Es decir,se soluciona con el clustering.Lo que se suele hacer en ese clustering es replicar únicamente el bus de eventos,teniendo un par de ellos en "stand by".
+
+ES es Event Sourcing
+CQRS es el patrón Command Query Responsibility Segregation 
+Transactional Output pattern es un patrón que dictamina que si un evento queda pendiente(por un posible fallo en un servicio X),ese evento será emitido en un futuro en cuanto se pueda emitir.
+
+VIDEO 09 Pros y Contras de la comunicación asíncrona
+VENTAJAS:
+El servicio D no necesita de otros para responder a una petición(NO dependencias directas) VENTAJA
+Si que necesita de otros servicios para manejar su base de datos(SI dependencia indirecta) DESVENTAJA
+Si cayerán el servicio A y B él aún puede trabajar al 100% VENTAJA
+El servicio D va a ser superrápido en comparación a hacer peticiones al A,B y C.Él tiene todo en un unico punto. VENTAJA
+DESVENTAJAS:
+Duplicación de datos.Teniendo en cuenta que un GB más o menos es 0.115$ al mes no es tanto problema(un producto de amazon pesa 1250bytes ~= 1.2k)
+Es difícil de comprender.
+
+SECCION 02 Video 10 App Overview
+La meta 1 es tomar contacto con la arquitectura de microservicios.
+La meta 2 es construir lo máximo posible desde scratch
+Nota:no usar esta template como plantilla.Habrá mejores
+Tendremos un servicio de posts  y otro de comentarios.Ambos pueden listarlos y crearlos
+Nota:cuando se crea un microservicio se especifica que tareas hará,en este caso solo listar y crear.El micro de comentarios va a ser un poco más complejo ya que cada comentario va a estar atado a un post
+
+Video 11 Setup del Proyecto
+En el browser voy a tener una aplicación de React,la cual se va a comunicar con un servicio de Post y de Comments(ambas serán aplicaciones Node con Express).Guardaremos todos los datos en memoria de momento.Sólo queremos ver como funciona de momento.
+Recapitulando crearemos una app con create-react-app,y dos basadas en express con lo que setear todo esto costará un poco.Empecemos:
+
+>>mkdir ~/Escritorio/MicroserviciosUdemy/01blog <- creo un dir para todo este proyecto
+>npx create-react-app client <- creo el cliente dentro de 01blog
+>>mkdir posts && cd posts <- creo otro dir para el servicio folder.Recuerda que es un proyecto node simplemente
+>npm init -y
+>npm i express cors axios nodemon
+Hago lo mismo para el servicio de comments
+>cd ../ && mkdir comments
+>npm init -y
+>npm i express cors axios nodemon <- instalo lo mismo para el tercer servicio
+
+Video 12 Post Service Creation
+Vamos a crear el código básico para este servicio.Cuando creemos un servicio es muy importante decidir que es lo que quiere hacer éste.
+En nuestro caso simplemente vamos a listar y crear posts,asi que habrá dos endpoints,ambos serán /posts uno por get para listar y otro por post para crear.El body de crear va a ser un simple { title:"string"}
+Asi que abrimos la carpeta posts y creo el index.js:
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const { randomBytes } =require('crypto');
+
+const app = express();
+app.use(bodyParser.json())
+
+const posts = {};
+
+app.get('/posts',(req, res) =>{
+   res.send(posts);
+	 })
+
+app.post('/posts',(req, res) =>{
+   const id = randomBytes(4).toString('hex');
+   const { title } = req.body;
+
+   posts[id] ={
+      id,title
+   };
+
+   res.status(201).send(posts[id]);
+})
+
+app.listen(4000,()=>{
+  console.log("listening on 4000")
+ })
+
+Tip:body-parser está en desuso,se recomienda usar express.json(el cual internamente llama a body-parser) Fijate como ha generado ids aleatorios
+Acuerdate que se puede acceder a las propiedades de un objeto con el punto o con corchetes y la prop como un string
+Por último asignamos el script start en el package.json con "start":"nodemon index.js".
+
+Adicionalmente yo voy a usar type:"module" para que no sea commons.js y me deje usar import/export,además uso express.json()como middleware para que parsee el body de las peticiones y entienda sintaxis json.
+
+VIDEO 13 TESTING POST SERVICE
+Realizar pruebas en los microservicios es una parte importantísima del desarrollo.De momento usaremos Postman para un testeo rápido.
+Abrimos la app,creo una colección, y una request a localhost:4000 con el verbo POST ,le mando algo y compruebo
+Debería recibir un 201 con el id y el titulo.Creo otra request para el get.Fijate que si reinicia nodemon lo pierdo todo.
+
+VIDEO 14 IMPLEMENTING COMMENT SERVICE
+De nuevo,tal como hicé con el servicio Post es buena idea dedicar un tiempo a especificar que es lo que quiero realmente.
+Las rutas van a ser /post:id/comments y por POST crearé un comentario para ese Post,por GET veré los comentarios de ese post.El body del comentario será un objeto con la propiedad content {content:string}
+Abro esta vez el folder de Comments y creo el index.js
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const { randomBytes } = require('crypto');
+
+const app = express();
+app.use(bodyParser.json());
+
+//el objeto va a ser diferente,por cada key va a tener un array de comentarios:
+/*
+{
+ 'k43':[{id:1,comment:"fdf"},{id:2,comment:"xxf"}]
+ 'cdc':[{id:4,comment:"fdxf"},{id:5,comment:"xxx"}]
+}
+*/
+const commentsByPostID = {}
+
+app.get('/posts/:id/comments',(req,res)=>{
+  res.send(commentsByPostID[req.params.id] || []); <- que devuelva el array y si no existe que devuelva uno vacio
+})
+
+app.post('/posts/:id/comments',(req,res)=>{
+	 const commentId = randomBytes(4).toString('hex');
+   const { content } = req.body;
+
+	 const comments = commentsByPostID[req.params.id] || [] ; //dará o un array o undefined
+								    
+	 comments.push({
+      id:commentId,
+      content
+   })
+
+   commentsByPostID[req.params.id] = comments;  
+
+	 res.status(201).send(comments);
+
+})
+
+app.listen(4001,_ => console.log('listening on port 4001'))
+
+VIDEO 15 QUICK TEST ON COMMENTS SERVICE
+De nuevo creo un par de requests en Postman para comprobar que el servicio funcione.Fijate en los enrutadores que coincidan.Lo siguiente va a ser la app de React.Una vez tengamos todo veremos grandes problemas para gestionar el intercambio de datos
+
+VIDEO 17 REACT PROJECT SETUP
+
+Lo primero es tener en cuenta la jerarquia de componentes de nuestra aplicación a implementar:
+Arriba estará App,como hijos tendrá PostList(todo lo de abajo que contiene la creación de comentarios y visualización y PostCreate(el form para crear el post) .De PostList saldrán CommentList(es la lista de comentarios que empieza con el bullet,un simple parrafo) y CommentCreate(el form para crear el comment que está mas abajo.Ver imagen 09)
+
+Antes de nada le instalamos axios a la app de React ya que lo vamos a usar para realizar peticiones HTTP
+>npm i axios
+>npm start <- debería arrancar en el 3000
+
+Creamos el pequeño form para crear un post:
+import React, { useState } from "react";
+import axios from "axios";
+
+function PostCreate() {
+  const [title, setTitle] = useState();
+
+  const handleSubmit = async (event) => {
+  event.preventDefault();
+  await axios.post("http:localhost:4000/post", { title });
+  setTitle("");
+  };
+
+  return (
+    <div>
+     <form onSubmit={handleSubmit}>
+      <div className="form-group">
+       <label>Title</label>
+        <input
+         value={title}
+         onChange={(e) => setTitle(e.target.value)}
+         type="text"
+         className="form-control"
+        />
+       </div>
+     <button className="btn btn-primary">Submit</button>
+    </form>
+  </div>
+ );
+}
+export default PostCreate;
+
+Nada del otro mundo.En principio debería fallar por las CORS
+
+		VIDEO 19 Handling With CORS error
+
+Cada vez que se intente hacer una petición a un socket diferente de en el que estoy voy a obtener un error de CORS(fijate que simplemente de localhost:3000 a localhost:4000 ya falla,ya que es un socket diferente,con el dominio va a suceder igual,de localhost:3000 a midominio.es:3000 va a dar fallo de CORS igualmente)
+Instalamos cors,lo importamos y usamos de middleware...
+
+			VIDEO 20 FETCHING & RENDERING POSTS
+
+Creo el componente PostList. Fijate que tiene que listar los posts asi que tendrá que hacer una petición al servicio de Posts.
+Vamos a meter ese fetch en un efecto para que sólo ocurra una vez.
+
+export const PostList = () => {
+  const [posts, setPosts] = useState({});
+
+  const fetchPosts = async (_) => {
+   const res = await axios.get("http://localhost:4000/posts");
+    setPosts(res.data);
+	  };
+
+  useEffect(() => {
+    fetchPosts();
+  }, []);
+
+  const renderedPosts = Object.values(posts).map((post) => {
+   return (
+    <div
+      className="card"
+      style={{ width: "30%", marginBottom: "20px" }}
+      key={post.id}
+  >
+   <div className="card-body">
+    <h3>{post.title}</h3>
+   </div>
+  </div>
+ );
+ });
+
+  return (
+   <div className="d-flex flex-row flex-wrap justify-content-between">
+    {renderedPosts}
+   </div>
+ );
+ Fijate como itera con Object.values(posts) y obtendrá un array de objetos con justo lo que necesitamos
+
+						 VIDEO 21 CREATING COMMENTS
+
+Vamos a crear el componente CommentCreate.js que será el formulario de creación de Posts(muy básico)Recordemos que necesitamos saber el id del Post ya que cada comentario pertenece a un post.
+
+  const [content, setContent] = useState("");
+	   
+   const handleSubmit = async (event) => {
+     event.preventDefault();
+						      
+      await axios.post(`http://localhost:4001/posts/${postId}/comments`,{
+	        content
+	    });
+	   setContent("");
+	 };
+																							   
+	  return (
+	   <div>
+	    <form className="" onSubmit={handleSubmit}>
+	     <div className="form-group">
+	      <label>New Comment</label>
+	      <input 
+	        type="text" 
+	        value={ content }
+	        onChange={ e => setContent( e.target.value ) }
+	        className="form-control"/>
+	     </div>
+	    <button className="btn btn-primary">Submit</button>   
+	   </form>
+	  </div>
+
+					VIDEO 22 LISTING COMMENTS
+
+Hacemos algo muy parecido a listar los posts :
+
+const renderedPosts = Object.values(posts).map((post) => {
+ return (
+   <div
+    className="card"
+    style={{ width: "30%", marginBottom: "20px" }}
+    key={post.id}
+   >
+    <div className="card-body">
+      <h3>{post.title}</h3>
+      <CommentList postId={ post.id } />   
+      <CommentCreate postId={ post.id } /> 
+    </div>
+   </div>
+ );
+
+Al final mostramos todo en el PostList.
+Bien,con todo echo podemos ver en network que hace algun fetch de más¿?.Veremos las issues de usar microservicios en videos posteriores
+
+				VIDEO 24 ESTRATEGIAS PARA MINIMIZAR LAS REQUESTS (Sync Solution)
+
+Vimos en el video anterior que por cada componente Post que tengamos va a hacer una peticion para los comentarios,lo cual es ineficiente.
+Nota: esto lo puedo ver en Network y XHR
+Tenemos que solucionar esto,no puede hacer peticiones recursivamente.
+Para solucionar esto podemos tomar dos caminos:
+
+ Sync Communication
+Con esta solución podriamos cambiar un poco el código y traer todo en una petición
+De nuevo esto tendrá ventajas y desventajas(como introducir dependencias,la petición será lenta,...)
+
+					VIDEO 25 ASYNC SOLUTION
+
+Si bien la solución sincrona sería algo fácil de implementar desde el punto de vista de la ingeniería no es la mejor solución.En este video veremos una solución basada en comunicación asíncrona.Recordemos que en este tipo de comunicación está en event Broker encargado de recibir eventos y redirigirlos a otros servicios.
+Vamos a introducir la idea de un servicio de Queries.La finalidad de este servicio es escuchar por cada vez que se cree un post o un comment(con lo que estos servicios van a tenerque emitir un evento también!)Después se le podría consultar todo en una única petición(fijate que es lo mismo que la comunicación síncrona pero sacandolo a un servicio)
+
+Como pros tendríamos que no hay dependencias entre servicios y que el Query Service sería superrápido!
+Como contras hay duplicación de datos(aunque veremos más adelante que esto no siempre es una desventaja
+También es una contra que es algo dificíl de implementar,sin ninguna duda.
+
+						VIDEO 26 FQA UNTIL NOW
+
+PREGUNTAS:
+1- Hay que crear un tercer servicio para los datos? <- no,de echo probablemente no habria dos servicios en un proyecto real ,serian uno solo en esta aplicacion
+2-A quien le importa que los servicios sean realmente independientes? <- esto es el core de usar microservicios asi que...
+3-Es demasiado complicado por un pequeño beneficio <- hasta ahora lo es,pero vamos a añadir una feature en breve que hará todo esto muuy fácil
+4- Este sistema no va a funcionar en este determinado escenario... <- hay soluciones para CASI TODAS LAS SITUACIONES POSIBLES
+
+					VIDEO 27 EVENT BUS DESIGN
+
+Lo primero que hay que tener en cuenta es que hay muchas formas de implementar el bus de eventos(RabbitMQ,Kafka,NATS,...)Todos son diferentes buses de eventos.Son proyectos open source.Los puedo descargar o usar alguna solución prehosteada
+Todos tienen en común que van a recibir eventos y despues publicarlos para los listeners
+Cuando hablamos de eventos no hay una forma en concreto en la que deban estar,puede ser JSON,puede ser raw data,un string,...
+Cuando hablamos de listeners estamos hablando de servicios que quieren escuchar a eventos emitidos
+De entre todas las implementaciones de un bus de eventos hay pequeñas features que hacen la async communication más fácil o más difícil así que hay que evaluar ciertas cosas a lahora de elegir una implementación del event bus
+De momento vamos a crear nuestra implementación con Express pero no va a implementar la mayoria de funcionalidades de un bus normal
+
+El objetivo es ver como trabajar.De nuevo,el bus va a ser una app plana Express,añadiremos rutas localhost:4000/events, localhost:4001/events y localhost:4002/events adicionales
+En resumen cada vez que un servicio haga una petición POST mandará un evento al bus y ese bus lo lanzará a todos los servicios interesados.
+
+				VIDEO 28 IMPLEMENTING THE EVENT BUS
+
+Para implementarlo creo otra carpeta en el directorio raiz con los servicios
+>mkdir event-bus
+>cd event-bus
+>npm init -y
+> npm i axios express nodemon
+
+EL CÓDIGO ES REALMENTE SENCILLO:
+
+const express = require('express');
+const axios = require('axios');
+
+const app = express();
+app.use(express.json());
+
+app.post('/events',(req, res) =>{
+  //todo lo que venga por el body es el evento en si
+  const event = req.body;
+  //automáticamente lo mandamos a los servicios listeners
+  axios.post("http://localhost:4000/events",event);
+  axios.post("http://localhost:4001/events",event);
+  axios.post("http://localhost:4002/events",event);
+
+ res.send({status:'OK'})
+
+ })
+
+app.listen(4005,_ => console.log('event bus service listening on 4005'));
+
+						VIDEO 29 EMITTING EVENTS TO THE BUS IN POST SERVICE
+
+Vamos a asegurarnos que mandamos un evento cada vez que se cree algo en nuestros dos servicios.
+El evento que manden será un objeto con dos propiedades.La primera será el tipo ,la segunda será la data en si:
+
+{
+ type: PostCreation,
+ data:{id:324234,content:"fsdfdsfs"}
+} <- fakin javascript
+Recuerda que el evento puede llevar cualquier estructura,pero se recomienda tener una fuerte consistencia entre ellos.
+Asi que en el servicio de Post mandamos el evento(fijate que hay que hacer la función asíncrona)
+
+//este es el momento ideal para mandar el evento al bus
+  await axios.post('http://localhost:4005/events',{
+    type:"PostCreated",
+    data:{
+      id,
+      title
+    }
+   })
+De momento dará algunos fallos
+
+VIDEO 30 EMITTING EVENTS TO THE BUS IN COMMENT SERVICE
+
+Hacemos algo de forma muy similar :
+
+ await axios.post('http:localhost:4005/events',{
+  type: 'CommentCreated ',
+   data:{
+      id: commentId,
+      content,
+      postId: req.params.id,
+      }
+ })
+
+				 VIDEO 31 RECEIVING EVENTS IN THOSE SERVICES
+
+Recuerda que el bus emite a /events asi que tendrán que tener la lógica para ese endpoint:
+app.post('/events',( req, res ) => {
+  console.log('Received event',req.body.type)
+
+  res.send({})
+});
+Con esto se cierra el circulo,los dos servicios tienen un endpoint para crear un recurso,el mismo por GET para verlo y además mandan por POST,es decir,crean algo en el bus de eventos.Despues lo consumen también por POST.Creo que tiene su lógica,ya que al crear por POST debo escuchar por POST¿?
+
+					VIDEO 32 CREATING THE QUERY SERVICE
+
+Recuerda que el propósito del servicio Query es poder hacer una petición para traer un listado de todos los posts y los comentarios asociados de una única petición.
+Va a tener dos endpoints uno por GET a /posts y otro por POST a /events
+Creo el proyecto con npm init -y e instalo express,nodemon  y cors(ya que él no va a emitir ningún evento)
+
+Nota: fijate en el consejo del pollo para salir por una única consola: https://www.udemy.com/course/microservices-with-node-js-and-react/learn/lecture/19099082#questions/10780248
+
+					VIDEO 33 PARSING INCOMING EVENTS
+
+El objeto posts en el servicio query va a tener esta pinta:
+/* post === {
+  "fkdsfks":{
+     id: "fkdsfks",
+	   title: "",
+		 comments: [ 
+		   {id:"df1":content:"contenido"},
+		   {id:"fs3":content:"contenido"},
+		   {id:"fs343":content:"contenido"},
+				    ],
+		}} */
+
+Asi que en el get simplemente devolvemos el objeto y en el post lo llenamos,recuerda que me estan mandando los datos:
+ app.post('/events',(req,res) => {
+   // recuerda que cada evento tendrá las propiedades type y data
+   const { type,data } = req.body;
+			    
+   if(type === 'PostCreated')
+   {//recuerda que en la data de un post vendrá un id y el title
+      const { id, title} = data;
+      posts[id] = 
+      {
+       id:id,
+       title:title,
+       comments:[]
+      }
+  }
+
+  if(type === 'CommentCreated')
+  {//en la data de un comment vienen 3 props diferentes
+   const { id, content,postId } = data;
+   const tmpPosts = posts[postId];
+   tmpPosts.comments.push({id,content}) ;
+  }
+
+  console.log(posts);
+	res.send({}) 
+ });
+ Resumen,cuando velga algo por post a /events,que es el bus tu aquí llenas el objeto con los datos.Obviamente será una base de datos en algo real.
+
+											VIDEO 34 USING THE QUERY SERVICE
+
+Ahora que tenemos en el 4002 el Query Service debo de usarlo.Fijate que en el frente estoy haciendo peticiones a localhost:4000 y ahora ya puedo hacerlo al 4002, así que vamos a cambiar eso,tanto en el PostList como en el CommentList.Puedo ver que ya sólo es necesaria una única petición.
+Además puedo constatar que sólo con el front y el Query Service puedo funcionar,ya que tiene 0% dependencias con otros servicios, y su misión es servir los datos(puedo parar los servicios Post y Comment para verlo).Lógicamente, no puedo crear posts ya que he bajado ese servicio,pero si puedo consultar los datos
+
+												VIDEO 35 ADDING COMMENT MODERATION FEATURE
+
+Vamos a analizar todos los comentarios y dependiendo de si tienen una determinada palabra ponerla una flag.Buscaremos por la palabra 'orange' pero podría ser más bien por contenido no permitido como insultos en una app real.A partir de ahora los comentarios tendrán estado: esperando por moderación(pending),exitoso(approved) o rejected(rechazado)												
+Si bien parece que implementar esto puede parecer fácil,veremos que en una arquitectura de microservicios se vuelve extremadamente complejo
+
+								VIDEO 36 ISSUES IMPLEMENTING FILTERING SERVICE
+
+Vamos a ver diferentes opciones para inplementar este servicio de filtrado:
+OPCION 1: en la opcion 1 el servicio de comments emitirá su evento,el servicio de filtrado emitirá el suyo y después el query service procesará ese comentario(todo sincrono)
+Fijate que hacerlo de esta forma va a crear un retraso en la creación de un comentario,pues el query service debe esperar a que se haga el filtrado(es aún más complejo,ya que también participa el event bus)
+Esto va a chocar con la inmediatez que demanda un usuario a la hora de crear un comentario.Esto va a ser una constante en microservicios,pues pocas cosas van a ser inmediatamente resueltas(fijate que además ciertos servicios pueden incluso depender de un humano con lo que el retraso puede ser hasta de días)
+
+													VIDEO 37 A SECOND APPROACH
+
+En la opción dos el usuario crea el mismo comentario,que lo gestiona el Comment Service,de nuevo manda un evento al bus,pero está vez el bus NO SÓLO LO MANDA AL FILTERING SERVICE,SI NO QUE TAMBIÉN LO MANDARÁ AL QUERY SERVICE PARA QUE LO PROCESE TAMBIÉN.
+Esta vez el query service tendrá una notificación inmediata de que se creó un comentario,aunque estará pendiente de que lo procese el filtering service
+Cuando se moderé ese comentario este filtering service emitirá otro evento,¡ojo!,con lo que el query service también estará escuchando por el evento comment moderated además del comment created
+Sin embargo,se nos presenta un problema, ya que el query service es un componente presentacional y no debería albergar lógica alguna, y lo está haciendo,está colaborando con la lógica.Está vez son solo tres estados,pero¿y si fueran 10?
+Asi que la opción dos tampoco es válida,aunque nos solucionaba la sincronia que debe haber al crear un post
+
+								 VIDEO 38 HANDLE WITH RESOURCES UPDATE
+
+Para evitar que el query service tenga un profundo conocimiento de la lógica,en vez de que procese el filtering service el comentario lo va a hacer el propio comment service
+Además tiene mucha más lógica que sea el propio comment service el que pueda categorizar un comentario.Una vez lo haya echo emitirá un único evento de tipo commentUpdated.El servicio que atienda este evento no necesita saber nada,simplemente debe tomar esos nuevos datos y sustituir a los viejos existentes
+El flujo será: el usuario crea un comentario,el comment service crea el comentario,manda el evento al bus ,este evento de tipo CommentCreated lo van a recoger tanto el filtering service como el query service.El moderating service lo moderará y emitirá el evento CommentModerated el cual hemos dicho que lo escuchará el CommentService y no el presentacional Query Service.Él emitirá ahora el evento CommentUpdated y esta vez el query service si le interesa este evento y lo manejará
+
+								VIDEO 39 CREATING THE MODERATION SERVICE
+
+ Tal como ya hemos echo anteriormente creamos un nuevo servicio en el directorio raíz:
+blog01> mkdir moderation
+>cd moderation
+>npm i axios express nodemon <- no usaremos cors
+
+Todo lo que hará este servicio es escuchar por el evento commentCreated
+
+								VIDEO 40 ADDING COMMENT MODERATION
+
+Debemos cambiar lo que tenemos hasta ahora,ya que debo guardar adicional al comentario la propiedad estado.
+Cada vez que cree un comentario vendrá con el estado 'pending'.Esto es en el comment service
+Asi que le añado esta nueva prop al crearlo.Recuerda que hay que mandar al bus un evento de tipo commentCreated y que los dos servicios query y moderation van a recibir esta nueva prop asi que la cambió en el código
+
+								VIDEO 41 HANDLING MODERATION
+
+Turno de implementar la lógica del moderado del comentario
+Recuerdsa que con CTRL+ Avâg vas un archivo a la derecha(abajo=derecha	
+
+app.post("/events", (req, res) => {
+  //traigo el tipo y la data del body
+	const { type, data } = req.body;
+
+  if (type === "CommentCreated") {
+   const status = data.content.includes("orange") ? "rejected"  : "approved";
+  //desde ahora ya puedo emitir el evento commentModerated,ouyea ya era hora
+
+NOTA:no se puede mandar una petición a un endpoint que no mande una respuesta porque se quedará esperando indefinidamente por esa respuesta.Toda peticion debe ser respondida(crear peticion= crear respuesta).	
+NOTA2:el bus está mandando los eventos a todos los servicios porque es su trabajo.Él no debe filtrar,eso es trabajo de cada servicio saber a que evento va a escuchar,pero el bus manda todo
+TIP: si bien puedo usar el spread operator para mandar la copia de la data es recomendable escribir las propiedades para mejor comprensión de lo que hace el código:
+
+  await axios.post("http://localhost:4005/events", {
+    type: "CommentModerated",
+	   data: {
+	    id: data.id,
+	    postId: data.postId,
+	    status: status,
+	    content: data.content,
+	 },
+	 });
+
+						VIDEO 42 UPDATING COMMENT CONTENT
+
+Recordemos que el bus aún tiene que mandar ese commentModerated al Comment service y que iba a ser ese servicio el que actualizará el status.Ahora mismo ni siquiera está escuchando por ese evento.
+Entender las propiedades que viajan en cada objeto es algo crítico,en lo que debería perder tiempo si necesito.
+
+app.post('/events',async ( req, res ) => {
+   
+   const { type, data } = req.body;
+			   
+   if (type === "CommentModerated") {
+     const { postId, id, status } = data;
+     const comments = commentsByPostID[postId];
+   //el método find para en cuanto encuentre la primera coincidencia,con lo que es más eficiente que filter,que va a recorrer todo el arreglo 
+	   const comment = comments.find(comment => comment.id === id)
+	  // const comment = comments.filter(comment => comment.id === id)[0] <- aunque me devuelva asi el primero seguirá recorriendo el array entero
+     comment.status = status;
+   //ahora hay que mandar el evento commentUpdated(que no tiene nada que ver con el commentModerated).Es un evento para el query service
+	   await axios.post("http://localhost:4005/events", {
+      type: "CommentUpdated",
+       data: {
+        id: id,
+        postId: postId,
+        status: status,
+        content: content,
+         },
+      });
+																		   
+							VIDEO 43 DEALING WITH QUERY SERVICE
+
+   if(type === 'CommentUpdated')
+	    {
+	      const { id, content, postId, status } = data;
+	      const tmpPosts = posts[postId];
+	      tmpComment = tmpPosts.comments.find(comment => comment.id == id)
+	      tmpComment.status = status;
+	      // puede que también haya cambiado el contenido asi que lo actualizo por si acaso
+        tmpComment.content = content;
+	   }
+	El código no es complejo.Sin embargo ,puedo darme cuenta que necesitamos una mejor metodológia para cambiar algo en el futuro que lo que acabamos de hacer,yendo uno por uno
+Fijate que para ver los detalles ha ido a preview
+
+NOta:crear un script que arranque todo:
+https://www.udemy.com/course/microservices-with-node-js-and-react/learn/lecture/19099126#questions/12650574
+Otro tip,si no me devuelve el puerto:
+>lsof -i tcp:4001 <- me devuelve el id del proceso que ocupa el puerto,la flag -i es obligatoria
+>kill -9 14617 <- para matar el proceso
+
+							VIDEO 44 RENDERING THE STATUS IN REACT APP
+
+Simplemente creamos un pequeño condicional para mostrar un contenido u otro.Puedo apreciar que mientras bajamos el moderation service el event bus trató de mandar un evento y cayó.Debemos corregir esto.Además,hemos perdido el evento también.
+Nota: puedo usar la funcion Regexp.test(variable) return Boolean que devuelve true o false si se cumple la regexp
+const status = (/orange/gi).test(data.content) ? 'rejected' : 'approved'; < gi de insensitive y global
+
+					VIDEO 45 DEALING WITH MISSING EVENTS AND SERVICES DOWN
+
+Con la explicación puedo observar que los servicios no están sincronizados.Mientras esten up no hay problema,pero hay que lidiar con cuando estén apagados.Como siempre hay varias formas de lidiar con esto:
+
+OPCION 1- SYNC REQUESTS:Cuando se levante un servicio hará una petición a los demás pidiendo todos los datos hasta ese momento
+OPCION 2- ACCESS TO DB: podriamos dar acceso directo a la DB cuando se levante un servicio
+Estas dos opciones no son muy buenas,asi que iremos por la opcion 3
+OPCION 3- Almacenar los eventos:teoricamente el query service podria funcionar si tuviera acceso a todos los eventos que se emitieron en el pasado0
+Desde ahora,cuando el bus reciba un evento,adicional a que lo mande a todos los servicios,lo va a almacenar(no en memoria,mejor una database ya que va a crecer exponencialmente
+Asi pues,cuando el query service se ponga online,pedirá todos los eventos almacenados e incluso con el mismo código podrá decidir que eventos le interesa,etc...
+Si bien añadir esta base de datos que va a crecer muy rápido puede parecer ineficiente,no lo es,ya que son sólo datos
+Además no sólo arregla el problema de que un servicio nuevo se cree por ejemplo un año despues,sino que si un servicio se cae solo tiene que pedir los eventos que le falten durante esa caida,ya que tiene los anteriores
+
+							VIDEO 46 IMPLEMENTING OPTION 3
+
+Cabe recalcar que hay software para hacer esto,asi que hay que tomarlo como una simple introducción para entender el concepto.
+En el bus creamos pues esa colección de eventos,de momento será un simple arreglo
+const events = [];
+
+app.post('/events',(req, res) =>{
+  //todo lo que venga por el body es el evento en si
+  const event = req.body;
+  events.push(event);   <- guardamos el evento en ese store
+
+
+app.get('/events',(req, res) =>{ <- cuando un servicio venga por get le devolvemos todos los eventos
+	   res.send(events);
+		 })
+
+Esto es un ejemplo de juguete.Manejar esto es mucho más complejo que esto.Bien,para que cargue los eventos el mejor momento parece ser justo cuando arranque:
+ app.listen(4002, async _ => 
+    {
+      console.log('Query service listening on port 4002');
+      const res = await axios.get('http://localhost:4005/events')
+
+      for(let event of res.data)
+      {
+        console.log("Processing event: ", event.type)
+        handleEvent(event.type, event.data);
+      }
+   });
+
+Fijate que estamos trayendo todos los eventos cuando sólo deberíamos traer los que se han perdido.Manejaremos también esto en el futuro.
+Nota importante:
+
+In the upcoming lecture, we will be testing event syncing by bringing down the Query service, creating a post, and then restarting the Query service. If you are using the newest version of Node (v15+) instead of the LTS (v14) version, there are going to be some breaking changes. Most notably that Unhandled Promise Rejections are now treated as errors instead of warnings and will cause the servers to crash. 
+
+You can read up about it here:
+
+https://nodejs.medium.com/node-js-v15-0-0-is-here-deb00750f278
+At the bare minimum, you'll need to add a catch block to every request of the event-bus/index.js:
+
+  axios.post('http://localhost:4000/events', event).catch((err) => {
+    console.log(err.message);
+  });
+  axios.post('http://localhost:4001/events', event).catch((err) => {
+    console.log(err.message);
+  }); ...etc...
+
+									VIDEO 48 EVENT SYNC IN ACTION
+
+Antes de nada hay que instalar axios en el query service,pues ni siquiera lo tenemos instalado.Si trato de crear un post con el query service bajado no lo creará,pero en cuanto lo levante de nuevo va a pedir los eventos y procesarlos(fijate que por eso sacó la función afuera,para verla desde el listen).Lo mismo debe ocurrir para un comentario,incluso puedo poner uno rejected									
+
+								VIDEO 49 DEPLOYMENT ISSUES
+
+Con Docker vamos a poder usar contenedores.Un contenedor es un espacio aislado de trabajo que contiene todo lo necesario para ejecutar una aplicación
+Containerizar incluso soluciona los problemas que tenemos para arrancar la aplicación(6xnpm start) por no decir que estamos asumiendo que tenemos nde instalado en cada servicio.Docker va a proporcionar solución asegurandome que cada contenedor tiene un node y ejecutó un npm install
+
+									VIDEO 51 KUBERNETES
+
+Kubernetes es una herramienta para correr múltipes contenedores
+Hay que pasarle una configuración para definir como queremos que se ejecuten e interactuen entre ellos
+
+Con Kubernetes lo que se hace es crear un clúster de máquinas virtuales.Puede tener desde una única mv hasta cientos.A todas estas vm se las conoce como nodos.Estos nodos son manejados por un master.El master es básicamente un programa que va a dirigir todo.
+Por ejemplo podremos decirle al master en su archivo de configuración que cree dos servicios post y que sean accesibles en la network
+
+Además.kubernetes va a hacer la comunicación entre nodos realmente fácil.También va a hacer fácil el escalado de servicios y la creación/deploy de ellos.
+Nota: hay que decir a kubernetes los recursos que quiere cada contenedor(CPU,RAM)
+Recuerda que kubernetes va a crear un canal de comunicación entre nodos.
+Recuerda que kubernetes es un clúster de maquinas virtuales,desde 1 hasta cientos,y que ya no son MVs en el entorno Kubernetes sino que son nodos.
+
+								VIDEO 53 DOCKERIZING POST SERVICE
+
+FROM node:alpine <- espefico la imagen base
+
+WORKDIR /app <- directorio de trabajo en el contenedor.Desde ahora todos los comandos serán relativos a este folder
+
+COPY package.json ./  <- sólo copio el package.json
+
+RUN npm install <- instalo todo
+
+COPY ./ ./  <- copio todo el código restante(entiendo que a /app
+
+CMD ["npm","start"] <- especifico el comando a ejecutar al arrancar el contenedor(deberia fallar si lo he movido a /app!!)
+
+IMPORTANTE!:como no quiero copiar el folder node_modules pero no quiero borrarlo tampoco tengo que ignorarlo,asi que voy a crear un .dockerignore también(fijate que la única mayúscula es la del Dockerfile)
+
+IMPORTANTE!: el Dockerfile cachea las lineas,por eso debe ir el package,json alli.En futuros builds docker reusará las dependencias a menos que lógicamente, las cambie.Docker sólo va a rebuildear la linea que cambie del archivo Dockerfile,asi que si el package.json nunca cambia nunca va a hacer un npm install 
+
+							VIDEO 54 REVIEW OF BASIC DOCKER COMMANDS
+
+>docker build -t stephengrider/post . <- buildea una imagen con el Dockerfile del directorio actual y le pone la tag stephengrider/posts 						>dockerk run [image id | image tag] <- crea y arranca un contenedor
+>docker run -ti [image id | tag][cmd] <- crea y arranca un container,pero sobreescribe al comando por defecto con el que digamos
+>docker ps <- printea información sobre los contenedores en ejecución
+>docker exec -ti [containerID] [cmd] <- ejecuta el comando especificado en un contenedor ACTIVO
+NOTA: fijate como la ejecución de una imagen pasa a llamarse contenedor
+>docker logs [containerID] <- ver los logs de ese contenedor.No se queda escuchando por más logs,es decir,me da los logs hasta el momento de ese contenedor(investigar como quedarse escuchando por nuevos logs)
+
+								VIDEO 55 DOCKERIZING ALL THE SERVICES
+
+Voy a copiar los dos archivos a todos los proyectos,ya que me valen, incluso para la app de React.								
+
+NOTA: debo de cambiar la forma de salir del modo insert al normal en vim <- pregunta a txus
+
+														VIDEO 56 INSTALLING KUBERNETES
+
+Hay dos posibilidades,o estoy en Windows/Mac o en LInux.Si estoy en linux tengo que instalar minicube.Esto no es del todo asi,también hay otras formas como usar mikro8s,que también va a crear un kubernetes con un único nodo(como minikube) o incluso puede instalarse de otras formas.Yo he usado minikube en linux y Docker Desktop en Win(usa minikube por detrás¿?)
+https://computingforgeeks.com/how-to-install-minikube-on-ubuntu-debian-linux/
+
+									VIDEO 58 KUBERNETES TOUR
+
+Lo primero es comprobar la instalación:
+>kubectl version
+ESto debe dar dos logs,uno para el cliente y otro para el server.Al parecer debería dar también bien el del server pero yo lo puedo arrancar con:
+>minikube start
+
+Flujo de trabajo de kubernetes: cuando tenga las imagenes que quiero usar como contenedores tendré en kubernetes varios nodos,recuerda que cada nodo es una VM,y y una vm/nodo es una computadora que va a ejecutar un numero indeterminado de contenedores para nosotros
+Normalmente en esta instalación en local sólo habremos virtualizado un nodo,y no será hasta que esté en la cloud que no use varios nodos/máquinas virtuales.
+Paso 1º: para ejecutar un contenedor a partir de una imagen primero tendré que crear un archivo de configuración.Dentro de este archivo le pasaremos algunas direcciones y parámetros de accesibilidad(básicamente hay que configurar el networking).Todo esto lo haremos con la herramienta de cli kubectl.Nota: kubernetes siempre va a mirar primero en tu máquina local por la imagen a containerizar,si no está en mi máquina después mira en hub.docker.com
+Cada contenedor va a ser hosteado en algo llamado 'pod'(un pod y un contenedor va a ser lo mismo para propósitos de este curso)Técnicamente un pod es lo que envuelve al contenedor y puede tener varios dentro de él
+Bien,volviendo al ejemplo de desplegar dos instancias del servicio post,kubernetes va a crear dos pod,cada uno con un contenedor de esa imagen.También va a desplegar algo llamado deployment , que va a leer en el configuration file y va a estar a cargo de esos pods,con lo que si uno cayerá,el deployment lo va a recrear automáticamente(estará a cargo de que haya el número dado de replicaciones/pods y de que estén ejecutandose)
+Paso 2º: para manejar el networking entre servicios kubernetes va a desplegar algo llamado services,y aquí es importante entender que en el mundo de kubernetes ese service va ser algo que nos da acceso a un running container dentro de nuestro cluster.Es decir,que el server/service va a ser algo a cargo de manejar el networking entre los diferentes microservicios de un cluster
+Este service nos va a hacer mucho más fácil la forma que tendrán de conectarse los nodos.
+
+								VIDEO 59 KUBERNETES TERMINOLOGY
+								
+Un clúster de kubernetes es una colección de nodos(vms) + un máster para manejarlos
+Nodo: una máquina virtual que va a correr nuestros contenedores
+Pod: más o menos ,un running container,aunque técnicamente un pod puede ejecutar varios contenedores,no sólo uno
+Deployment:monitoriza un set de pods,asegurandose que están running y levantandolos si fuera necesario
+Service:provee una URL de fácil acceso para acceder a un running container
+Nota: es muy importante recordar que en kubernetes un servicio va a ser algo totalmente diferente a lo que es fuera de él,ya que va a ser simplemente una url.
+
+							VIDEO 60 NOTES ON CONFIG FILES FOR KUBERNETES
+
+Vamos a ver como crear los files para los pods,services y deployments:
+1º: kubernetes va a tratar estos 3 términos como Objetos,asi que en otras palabras voy a estar creando archivos de configuración para objetos.
+2º: van a estar escritos en notación yaml
+3º: siempre vamos a guardar estos archivos en nuestro proyecto y hacerle control de versiones.Esto es así porque el archivo es fundamental,ya que es la configuración per sé de la aplicación.Prácticamente son la documentación del proyecto
+4º: sólo se recomienda crear estos objetos por cli en entornos de desarrollo.No es nada recomendable usar la cli en un entorno de producción(hay un par de exclusiones aún asi)
+
+											VIDEO 62 CREATING A POD	
+
+Vamos a crear de momento un único pod(recuerda que es un running container).Lo vamos a hacer en nuestro servicio post y además vamos a hacer un rebuild:
+>cd post
+>docker build -t stephengrider/posts:0.0.1 . 
+Una vez echo esto voy al VSC y creo un nuevo folder llamado infra(de infraestructure).En esta carpeta va a estar todo lo relacionado con la configuración.Dentro creo un subfolder llamado k8s donde va a estar la configuración relacionada con kubernetes.Ya sí dentro de aquí creamos el post.yaml:
+
+apiVersion: v1
+kind: Pod <- le decimos a kubernetes que queremos crear un Pod
+metadata:  
+  name: posts <-el nombre de ese pod va a ser posts 
+spec: 
+  containers:
+    - name: posts <- dentro de ese pod va a haber un contenedor,el cual le vamos a llamar posts también y usará esa imagen 
+      image: postservice:0.0.1 
+
+Ahora me cambio a esa carpeta infra:
+> cd .. && cd infra/k8s
+>kubectl apply -f posts.yaml
+pod posts created <- debería ver como crea un pod
+Nota: yo tengo que arrancar el minikube (puedo ver su estado con minikube status y arrancarlo con start,pause,unpause,stop,... ver minikube help).
+Vamos a usar muchos comandos con kubectl,de momento puedo ver los pods activos con kubectl get pods:
+>kubectl get pods
+
+Nota: me da error porque estoy usando una imagen local,y kubernetes trata de bajarla de DockerHub.
+containers:
+        - name: posts
+          image: stephengrider/posts
+          imagePullPolicy: Never
+Además,necesito borrar ese Pod ya que no se puede actualizar la imagePullPolicy de un pod:
+>kubectl delete pods <pod name>
+Despues ejecuto el kubectl apply -f,pero antes también tengo que hacer el build de la imagen 
+
+Al final he tenido que cachear en minikube el servicio:
+>minikube cache add postservice:0.0.1 <- sin embargo lo van a deprecar,otra solución parece subir el build a dockerhub
+
+Tambén le puedo pasar el driver al arrancarlo:
+>minikube stop
+>minikube start --driver=docker (it will start the docker container)
+
+>eval $(minikube docker-env) <- esto también lo soluciona,minikube debe usar a docker como env/driver
+This will set the registry to minikube VM and will work only for this terminal session. 
+You should see only the images from the VM now, not the local images. So, you will have to build the images again and you will through docker images command.
+						
+						VIDEO 64 UNDERSTANDING A POD SPEC
+
+Desglosemos un poco el config file que acabamos de crear:
+
+apiVersion: v1 <-kubernetes es extensible.Viene con una lista de objetos predefinidos que podemos crear como pods,deployments,services,...Especificar v1 es decir a kubernetes que piscina de objetos queremos que use(en este caso va a mirar en la piscina pre-built llamada v1
+kind: Pod <- el tipo de objeto que vamos a crear
+metadata: <- la metadata va a incluir opciones de configuración para el objeto que estamos creando(el nombre es de lejos la propiedad más usada como metadata).Fijate que esta propiedad name es la que voy a ver al ejecutar kubectl get pods
+  name: posts
+spec: <- specifications son una lista de atributos muy precisos y exactos que queremos aplicar al objeto que estamos creando
+  containers:
+    - name: posts <- un dash significa una entrada al array,ya que containers acepta un array,asi que podria haber más '- name' 
+    image: postservice:0.0.1
+    imagePullPolicy: Never
+
+		cada vez que usara otro dash/guión meteré otro contenedor,pero recordemos que vamos a usar sólo uno, aún así como es un array necesita el guión.
+
+					VIDEO 65 COMMON KUBECTL COMMANDS
+
+Recuerda que docker va sobre ejecutar un contenedor,kubernetes va sobre ejecutar un grupo de contenedores.Ya no vamos a usar docker mucho más,lo que vamos a usar es kubectl,veamos algunas similitudes entre ellos:
+>kubectl get pods (similar a docker ps,devuelve todos los pods)
+>kubectl exec -it [podname][command] <- igual que docker exec -it containername command,ejecuta un comando en ese pod
+>kubectl logs [podname] <- devuelve todos los logs de ese pod
+>kubectl delete pod [podname] <- borra ese pod
+>kubectl apply -f [configFile] <-le ordena a kubernetes que procese ese archivo de configuración
+>kubectl describe pod [podname] <- describe ese pod de forma similar a un docker inspect
+Fijate que delete pod y describe pod llevan la palabra pod adicionalmente
+NOTA: parece que hay que entrar con sh,no deja con bash,whatever.Además,si hubiere más de un container en un pod, kubernetes va a preguntar en que contenedor es donde quiero ejecutar el comando sh
+NOTA:al usar describe pod podname al final va a salir una lista con eventos,puede ser importante para saber si va algo mal con un pod
+
+						VIDEO 66 A TIME-SAVING ALIAS
+
+Recuerda que él usó k get pods,aunque parezca que es poco me va a ahorrar tiempo escribir k en vez de kubectl:
+Nota: voy a crear un script para cambiar el escape por el bloqueo mayusculas(quiza lo suyo sería dejar el bloqueo en el escape)Parece que sólo dura para esa sesión de las X
+
+Poner esto en un archivo:
+remove Lock = Caps_Lock
+keysym Escape = Caps_Lock
+keysym Caps_Lock = Escape
+add Lock = Caps_Lock
+
+y arrancarlo con:
+>xmodmap filename.Hay que investigar más sobre esto!.
+Nota:en el VSCode no funciona pero poniendo esto en settings lo coge:
+{
+  "keyboard.dispatch": "keyCode"
+}
+Siguiendo con el video,creo un alias en el .bashrc:
+alias k="kubectl" <- ojo que va todo junto
+Nota: en PowerShell es : Set-Alias k kubectl
+
+					VIDEO 67 INTRODUCING DEPLOYMENTS
+
+Cabe destacar que realmente no se crean los pods,de esta manera,con un archivo de configuración.En vez de crearlos asi,normalmente se crean mediante un deployment.Un deployment es un objeto de kubernetes que va a manejar un set o grupo de pods.
+Todos estos pods,ya sea 1 o 100 van a ser idénticos en naturaleza.
+El deployment va a tener dos tareas principalmente:
+1ª: si un pod crashea el deployment va a levantar uno nuevo automáticamente
+2ª: la segunda tarea para la que también es muy bueno es actualizar los pods,el deployment lo va a hacer en tiempo real sin problema alguno(va incluso a borrar los obsoletos,quedandose con los nuevos).
+Podemos decir que es algo asi como un gestor de pods,un pod manager
+
+				68 CREATING A FILE FOR DEPLOYMENT
+
+Lo primero es que ya no vamos a necesitar más el archivo .yaml antigüo(puedo cambiar la extensión de momento).Vamos a crear uno llamado posts-depl.yaml para asi saber que corresponde a un deployment:
+
+apiVersion: apps/v1 <- recuerda que hay varios buckets predefinidos,en este caso el deployment está aquí,sin más(el pod estaba en v1...)
+kind: Deployment <- el tipo va a ser un Deployment
+metadata:
+  name: posts-depl <-cuando vea depl voy a saber que es un deployment
+spec:
+  replicas: 1 <- replicas es el umero de pods que quiero crear ejecutando una imagen en concreto
+	selector:
+	  matchLabels:
+		  app: posts
+	template:
+	  metadata:
+		  labels:
+			  app: posts
+
+Tanto el selector como la label metadata de dentro de template trabajan juntos.Recuerda que el deployment es un gestor de pods,asi que hay que decirle cuales debe gestionar,lógicamente,asi que para ello es el selector y la metadata label 
+Asi el selector va a buscar y matchear(matchLabels prop) los pod que se llamen posts(app es un formalismo,es un simple par de claves valor app:posts)¿Entonces un deployment solo ejecuta el mismo pod,pudiendo replicarlo,pero en definitiva el mismo?   
+En la template es donde queremos especificar la configuración exacta del pod que queremos que este deployment cree,y es aqui donde le estamos diciendo que cree un pod con la label app: posts (que fijate que hace match con el par de clave-valor del selector)
+
+    spec: <- de nuevo esta spec se refiere al pod,ya que esta dentro de template,aunque aqui no se ve la identación
+		  containers:
+			  - name: posts
+				  image: nombreimagen:version
+
+Lógicamente ese pod creado necesita una imagen,es aqui,en spec donde especificamos todo esto
+Recuerda que cada vez que quiera hacer un cambio en un cluster tengo que usar el comando kubectl apply visto anteriormente:
+>kubectl apply -f posts-depl.yaml <- 
+
+				VIDEO 69 COMMON COMMANDS FOR DEPLOYMENTS
+
+1º:>kubectl get deployments <- va a listar todos los deployments(que no pods) en ejecución
+2º:>kubectl get pods <- va a mostrar los pods.
+NOTA: si intento borrar el pod manejado por el deployment se va a crear otro,va a ser imposible borrarlo 
+>kubectl delete pods posts-depl-c65d6c4d4-nq5lq <- si borro uno...
+>k get pods
+posts-depl-c65d6c4d4-f7fbd <- va a montar otro con el hash de la primera parte antes del guión identico pero la segunda parte cambia
+Fijate que esto no lo hacia la anterior forma de crear el pod,y que es una feature fantástica que se autodeployee si crashea...
+
+3º:kubectl describe deployment [deploy name] <-imprime detalles acerca de ese despliegue.De nuevo lo usaremos para debug
+4º:kubectl apply -f [configFile] <- para aplicar un archivo de config
+5º:kubectl delete deployment [deploymentName] <- para borrar un deployment.En el momento que se borra un deployment se van a borrar todos los pods asociados a él.IMPORTANTE
+Fijate que hay que especificar si es un deployment,un pod...
+¿Si necesito borrar un pod hay que borrar el deployment o puedo pararlo?<- investigar
+ 
+NOTA:como estoy usando minikube sólo tengo un nodo,pero si necesito ayuda sobre él puedo ejecutar:
+>kubectl get nodes <- para ver los nodos,sólo debería aparecer uno como minikube,hacerlo en Windows para ver el nodo que usa
+>k describe node [nodeName] <- aqui me puede dar información como la RAM o el espacio
+
+NOTA: se puede especificar un puerto en el archivo:
+spec:
+  containers:
+   - name: posts
+     image: <yourname>/posts:0.0.1
+     ports: <- también es un array
+      - containerPort: 4000
+
+							VIDEO 70 UPDATING DEPLOYMENTS
+
+Recordemos que hemos comentado que es muy fácil actualizar la versión del pod con los deployments.Es posible que crearamos una version 2 del servicio post y querremos que el deployment haga el update automáticamente.Hay dos formas de hacer esto.En este video veremos la primera forma de hacer ese update(no se usa mucho en entornos profesionales):
+Paso 1º: hacer un cambio al código del proyecto
+Paso 2º: rebuildear la imagen,usando una nueva tag
+Paso 3º: en el archivo de deployment actualizar ese cambio
+Paso 4º: ejecutar el comando k apply -f config.yaml
+
+Asi que hago un minimo cambio y hago el rebuild (docker build -t postservice:0.0.5) , le hago el cambio al post-depl.yaml y hay que decir a kubernetes que lo actualize(importante,sólo por realizar un cambio en el archivo no va a cambiar nada en el cluster)
+Cada vez que se haga un cambio en un archivo de configuración 'hay que darselo de comer' a kubernetes,mediante el comando k apply -f config.file.
+Kubernetes va a saber que ese archivo ya lo ha usado una vez y que por ello ese objeto ya existe,en oposición a si fuera la primera vez en la que crearía ese nuevo objeto:
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ k apply -f post-depl.yaml 
+deployment.apps/posts-depl configured <- fijate que ahora dice configured pero la primera vez dijó created
+La razón por la que no se usa esta opción es porque hay que abrir el archivo,el cual va a crecer mucho,y puede ser un punto de fallo.Sería mejor que kubernetes automáticamente cogiera siempre la última versión y nosotros no tengamos que hacer nada.
+Problemas: puede que me esté cogiendo de la cache de minikube:
+
+Agrega, elimina, o empuja una imagen local dentro de minikube, haciendo minikube(add, delete, push) respectivamente.
+
+Available Commands:
+  add         Add an image to local cache.
+  delete      Delete an image from the local cache.
+  list        List all available images from the local cache.
+  reload      reload cached images.
+
+Nota:metiendolo a la cache lo soluciono,pero deberia buscar otra forma más de hacerlo
+
+						VIDEO 71 PREFERRED UPDATING METHOD
+
+En este video vamos a ver la forma aconsejada de actualizar la versión de un pod.Los pasos serán:
+Paso 1º: el deployment file debe usar la tag :latest en la zona de spec de pods.(recuerda que no poner nada también significa :latest!!!)
+Paso 2º: hacer una actualización al código
+Paso 3º: buildear la imagen ( aqui puede que yo deba de cachearla también) docker build dockerid/image<- con el dockerid delante va pa dockerHub
+Paso 4º: pushear la imagen a Dockerhub ( docker push dockerid/image) <- es posible que haya que hacer docker login...
+Paso 5º: kubectl rollout restart deployment [deployName] <- restarteamos el deploy en cuestión
+Nota: para saber el nombre del deploy con k get deployments
+>deployment.apps/posts-depl restarted <- debería de restartearse
+He tenido problemas: tuve que borrar el deployment,levantarlo(con k apply...) y agregar imagePullPolicy: Always para que ahora si lo coja del repo.
+Para cerciorarme puedo hacer un k logs podName:
+
+> posts@1.0.0 start
+> nodemon index.js
+
+[nodemon] 2.0.7
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching path(s): *.*
+[nodemon] watching extensions: js,mjs,json
+[nodemon] starting `node index.js`
+version latest again  <- da el login que debe darselo
+post service listening on 4000
+
+								VIDEO 72 NETWORKING WITH KUBERNETES
+
+Nota: instalar kubernetes y sobre todo docker de forma correcta en Windows.Hacer un par de apps para MongoDB.Aun me falta una,pero estoy en ello.Hacer el video de Alberto sobre docker-compose,instalar en el curro todo.Debo repasar este archivo y el de bash.
+
+Volviendo al video,como podemos realizar una petición a nuestro contenedor,si está en un pod que a su vez está en un deploymente que está en un node?Bien,recordemos que habiamos hablado de los services,que es otro tipo de objeto en kubernetes,asi que es con los services con lo que comunicaremos los pods.
+Para crear un service lo vamos a hacer también con config files.Asi que cada vez que necesite comunicación o networking entre los pods o también desde fuera del clúster(desde el exterior).Y por esto es que cada vez que cree un pod va a ir acompañado de un service realmente(no como hasta ahora)
+
+			TIPOS DE SERVICIOS:
+
+CLUSTER IP : establece una URL de fácil acceso.Sólo expone a los pods dentro del clúster
+NODE PORT:  hace un pod accesible desde fuera del cluster.Sólo recomendado para dev_ops
+LOAD BALANCER: hace que un pod sea accesible desde fuera del cluster.ES LA MANERA CORRECTA DE EXPONER UN POD AL EXTERIOR
+EXTERNAL NAME: redirecciona una petición in-cluster a una URL tipo CNAME
+
+Aunque hay 4 tipos en la práctica sólo se usan CLUSTER IP y LOAD BALANCER por motivos obvios
+
+							VIDEO 73 CREATING A NODE PORT SERVICE
+
+Vamos a crear nuestro primer servicio.No tiene sentido que cree un Cluster IP ya que sólo tengo un pod,y tampoco empezar por un load balancer ya que es un poco complejo.
+Asi que vamos a empezar con un Node Port
+Fijate que crear este servicio es sinónimo de crear un archivo de configuración,ya que todo objeto en kubernetes va a crearse con kubectl apply -f configfile.Asi que creamos un archivo y lo llamamos post-srv.yaml a la altura de posts-depl.yaml
+
+apiVersion: v1 
+kind: Service
+metadata:
+  name: post-srv <- va a ser el nombre del servicio.IMPORTANTE
+spec:
+  type: NodePort <- el tipo de servicio que ya he visto
+	selector:
+	  app: posts <- con el selector le estamos diciendo al servicio que intente buscar todos los pods con el nombre de 'posts' y los exponga
+Puedo pensar en ello como un selector de clase CSS,y no como un ID
+  ports:
+	  - name:posts
+		  protocol: TCP
+			port: 4000 <- puerto por el que sale el nodePort
+			targetPort: 4000 <- puerto que expone el contenedor
+
+Las propiedades port y targetPort son un poco confusas.TargetPort se refiere al puerto que está abierto en el contenedor(al puerto que expone el servicio)
+Estamos creando un NodePort service,y este servicio va a tener su propio puerto,esta es la propiedad port.
+Asi que lo que haremos es enviar tráfico al puerto 4000 al NodePort y éste lo redirigirá al 4000 del contenedor
+Normalmente el port y el targetPort son el mismo.
+Fijate que en la imagen hay aún un puerto más,hablaremos de él también
+
+						VIDEO 74 ACCESING NODEPORT SERVICE
+
+Ya tengo el archivo finalizado asi que lo aplico desde esa ubicación:
+>k apply -f posts-srv.yaml
+Para ver los servicios uso:
+>k get services 
+Debería ver uno por defecto de kubernetes y el recién creado:
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP          4d19h
+posts-srv    NodePort    10.101.140.199   <none>        4000:30945/TCP   5s
+El puerto que va desde el 30000 al 32000 va a ser aleatorio
+
+NOTA: para acceder a este servicio es diferente si lo hago desde minikube o desde Docker for Mac/Windows.Desde Mac/Windows voy a poder acceder con localhost:3x.xxx/posts(el puerto aleatorio de arriba) pero desde minikube tengo que usar la IP de minikube (comando minikube ip) y acceder con 
+192.168.x.x:3x.xxx/posts <- ver imagen 34
+
+si voy a  http://192.168.49.2:30945/posts (fijate que puedo hacer un curl -i) me deberá devolver un objeto vacío(-i para que muestre las cabeceras,en las cuales puedo ver el character-set)
+Recuerda que puedo hacer curl -Lo archivo url para descargarlo(tmb curl -L url -o archivo, -o archivo van juntos!) 
+Bien,ya sabemos como acceder a un pod,aunque en realidad aun queda mucho,tienen que conectarse entre ellos con las cluster ip y usar un load balancer en vez de un nodeport...
+
+									VIDEO 75  SETTING UP CLUSTER IP SERVICE
+
+Recordemos que en nuestra aplicación cada servicio va a emitir un evento y que este evento va a ser captado por el event-bus y retransimitido a todos los demás servicios.
+Además ya tenemos un pod que esta ejecutando el post service,asi que vamos a tratar de crear otro para el bus de eventos.Estos dos pods necesitan comunicarse internamente,asi que van a necesitar un cluster ip cada uno(ver imagen 35).
+Nota: puedo cambiar las cpus que usa minikube y la ram:
+>minikube delete xxxxx  && minikube start --cpus 4 --memory 8192 
+
+							VIDEO 76 BUILDING A DEPLOYMENT FOR THE EVENT BUS
+
+Pasos a seguir:
+1º: Construir una imagen para el event-bus
+2º: Pushear la imagen a DockerHub
+3º: Crear un deployment para el servicio
+4º: Crear un Cluster IP file para los pods posts y event-bus
+5º: Conectar todo en un último paso
+
+Asi que voy a la raiz del folder con el servicio event-bus con vision en el Dockerfile y hago el build para el repo:
+>docker build -t dockerid/event-bus:latest .
+>docker push dockerid/name <- puede necesitar un login(mira en el trabajo a ver)
+
+Recuerda que kubernetes por defecto trata de bajarse la imagen de DockerHub; para cambiar ese comportamiento hay que cambiar la imagePullPolicy a Never | Always | IfNotPresent(si no está en el repo¿?)
+
+								VIDEO 76 ADDING CLUSTER IP SERVICES
+
+Bien,ya hemos desplegado el deployment,vayamos por el servicio.Hay gente que crea un archivo para cada objeto,y otros com Sthepen crean todo en un único archivo ya que deployment y service van de la mano realmente.
+Nota: para crear múltiples objetos en un único archivo usaré '---' <- triple dash
+      containers:
+        - name: event-bus
+          image: oscargm40/event-bus:latest
+          imagePullPolicy: Always
+---  FIJATE EL USO DEL TRIPLE GUION COMO SEPARADOR PARA K8S!!
+apiVersion: v1          
+kind: Service
+metadata: 
+  name: event-bus-srv
+spec:   
+  selector:
+    app: event-bus
+  type: ClusterIP
+  ports:    
+   - name: event-bus
+     protocol: TCP
+     port: 4005
+     targetPort: 4005
+
+Una vez terminado volvemos a aplicar el archivo(fijate que el deployment no va a cambiar, y que aunque lo hiciera,puedo aplicar el mismo archivo las veces que quiera,kubernetes ya sabrá si crear algo,actualizarlo,etc...)
+>kubectl apply -f file.yaml
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ k apply -f event-bus-depl.yaml 
+deployment.apps/event-bus-depl unchanged
+service/event-bus-srv created  <- k es muy asin para esto,asin...
+
+> k get services
+NAME            TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+event-bus-srv   ClusterIP   10.96.119.55     <none>        4005/TCP         94s
+kubernetes      ClusterIP   10.96.0.1        <none>        443/TCP          6d2h
+posts-srv       NodePort    10.101.140.199   <none>        4000:30945/TCP   30h
+
+Nota:ya tengo uno con el nombre de posts-srv de tipo NodePort para el exterior,pero voy a necesitar otro de tipo ClusterIP.Fijate que no voy a poder llamarlo 'post-srv' a ese de tipo ClusterIP.
+
+							VIDEO 78 HOW TO COMUNICATE BETWEEN SERVICES
+
+Recuerda que no hay ningun problema en aplicar un archivo,ya que kubernetes sólo va a aplicar los cambios en él.
+Recuerda que para ver el DML puedo usar \d+ api.ping_google donde api era¿?
+Fijate que ya no vamos a poder alcanzar la URL http://localhost:4005 pues estamos en kubernetes.La nueva URL va a ser igual que el nombre del cluster IP service(lo puedo ver con k get services).
+Asi que vamos a tener que cambiar la peticion por http://event-bus-srv:4005/posts y de la misma forma el event-bus va a tener que cambiar las peticiones.Asi que el paso 5º de ¡wire up it all! anterior básicamente lo puedo traducir por cambiar todas las peticiones en el código que ya tengo.
+
+							VIDEO 79 UPDATING SERVICE ADDRESSES
+
+Vamos a tener que crear archivos de configuración para los servicios restantes,pero de momento empecemos por lo descrito en el video anterior.
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ k get services
+NAME                  TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+event-bus-srv         ClusterIP   10.96.119.55     <none>        4005/TCP         3d12h
+kubernetes            ClusterIP   10.96.0.1        <none>        443/TCP          9d
+posts-clusterip-srv   ClusterIP   10.103.189.79    <none>        4000/TCP         3d12h
+posts-srv             NodePort    10.101.140.199   <none>        4000:30945/TCP   4d19h
+
+Ya que me dicen el puerto es importante que lo compruebe también!
+
+IMPORTANTE!: Al cambiar el código fuente fijate que voy a tener que desplegar la imagen a DockerHub de nuevo,ya que ha habido cambios,haciendola un nuevo build y un nuevo push a mi repo
+>docker build -t dockerid/imagen . <- o la ruta que sea
+>docker push dockerid/imagen
+Una vez haya terminado recuerda que hay que hacer un kubectl rollout restart deployment [deploymentName] (puedo verlos con k get deployments)
+>kubectl rollout restart deployment xxx
+Deberia asegurarme que los pods han sido restarteados con k get pods:
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/event-bus$ k get pods
+NAME                              READY   STATUS    RESTARTS   AGE
+event-bus-depl-79f7c684c6-m6fpc   1/1     Running   0          87s
+posts-depl-59b4b9d87d-nbbw6       1/1     Running   0          76s
+
+							VERIFING COMMUNICATIONS
+
+Si bien en teoría la comunicación funciona vamos a comprobarlo con Postman y tratando de crear un post.
+La petición va a ser a través del NodePort,y es un poco diferente si uso minikube ya que va a ser http://minikubeID:port cuando con los demás va a ser localhost en vez de la ip.(fijate que es un 192.168.x.xxx
+Asi que voy a Postman y creo una new request a http://192.168.49.2:30945/posts(localhost si no uso minikube),deberia de poder crear un post.
+Pero también queremos ver los logs del pod,para asegurarnos que están intercambiando eventos:
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/event-bus$ k get pods
+NAME                              READY   STATUS    RESTARTS   AGE
+event-bus-depl-79f7c684c6-m6fpc   1/1     Running   0          3h4m
+posts-depl-59b4b9d87d-nbbw6       1/1     Running   0          3h4m
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/event-bus$ k logs posts-depl-59b4b9d87d-nbbw6
+
+> posts@1.0.0 start
+> nodemon index.js
+
+[nodemon] 2.0.7
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching path(s): *.*
+[nodemon] watching extensions: js,mjs,json
+[nodemon] starting `node index.js`
+version latest again
+post service listening on 4000
+Received event PostCreated
+
+Con este último log puedo certificar que la información viajó del post service al event-bus y que esté le devolvió el body y él sacó el tipo y lo imprimió correctamente.
+NOTA: debería tratar de desplegar la app en Docker Desktop también.
+
+						VIDEO 81 ADDING THE REST OF SERVICES
+
+Veamos los pasos que tengo que seguir para integrar el resto de servicios:
+1º: actualizar la URL para que alcancen al 'event-bus'
+2º: construir las imagenes y pushearlas a DockerHub
+3º: crear un deployment y un clusterip para cada uno
+4º: actualizar de nuevo el even-bus service para que mande a todos los eventos
+
+El paso 1 es simplemente sustituir la URL... el segundo llamaré a todos xxxx-service desde ahora(docker build -t dockerid/service path) 
+El paso 3 simplemente es copiar los depl.yaml y para integrarlos vamos a hacerlo en un solo paso:
+>kubecrl apply -f . <- le digo que aplique todo,asi es mejor!(ubicarse alli primero)
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ k apply -f .
+deployment.apps/comments-depl created
+service/comments-srv created
+deployment.apps/event-bus-depl unchanged
+service/event-bus-srv unchanged
+deployment.apps/moderation-depl created
+service/moderation-srv created
+deployment.apps/posts-depl unchanged
+service/posts-clusterip-srv unchanged
+service/posts-srv unchanged
+deployment.apps/query-depl created
+service/query-srv created
+
+Puedo ver que creará lo necesario,pero lo compruebo con k get pods & services & deployments mejor...
+NOTA: si no hago bien el despliegue lo primero que tengo que hacer ante un error es describir el pod( k describe pod podName)
+
+Por último recuerda que hay que actualizar el event-bus con estas URLs.
+
+I understand for clarity that we go into and out of each directory to build the docker files, but it is much easier to be in the root directory and then name the directory on the build. eg: docker build -t username/comments ./comments
+
+ You can run docker push from the root.
+
+ Also true of kubectl apply -f ./infra/k8s <- no entrar y salir tanto,pues lo puedo hacer desde el root con relativas
+
+								 VIDEO 82 TESTING COMMUNICATIONS AGAIN
+
+Aún falta actualizar el código en la app de event-bus asi que habrá que hacer un build y un push antes de actualizar el deployment...
+>docker build -t ...
+recuerda que hay que restartear el deployment!:
+> kubectl rollout restart deployment
+Bien ,para testear vamos a hacer lo mismo,crear un post desde Postman y esta vez voy a entrar a ver los logs de cada pod.Si veo que recibe los eventos,será que esta todo correcto (all is wired up)
+
+								VIDEO 83 LOAD BALANCER SERVICE
+
+Recordemos que aún nos falta la aplicación de React.Lo que vamos a hacer es meterla en un pod.Fijate que es lo que debo servir cada vez que un usuario se quiera conectar a esta app,asi que será un React App Dev Server.
+Este server sólo va a servir el HTML,CSS y Javascript al navegador del cliente,y ojo,él no está encargado de realizar nada más que esto;será el cliente en su navegador el que haga las peticiones.
+Entonces tenemos que asegurarnos que la app de React puede hacer peticiones a todos los pods.Pero,¿como podemos hacer esto?Tenemos dos opciones:
+1ª: la primera sería crear un NodePort para cada pod.Sin embargo,no es una buena idea,y la razón de esto es porque el NodePort abre los puertos aleatoriamente y no podemos saber a ciencia cierta que puerto es.Entonces lo que haremos es usar la opción dos
+
+2ª: crear un servicio de balanceo de carga:vamos a crear un servicio de balanceo.La finalidad de ello es tener un único punto de entrada al clúster.Es aquí a donde va a mandar las peticiones el frente.Este servicio va a tener algo de lógica que permita enrutar las peticiones al pod/container apropiado.Cuando decimos que alcanzará el pod estamos diciendo que se comunicará con el clusterIP service realmente
+
+						VIDEO 84 LOAD BALANCERS AND INGRESS
+
+Voy a tener que entender que crear este balanceador va a ser algo un poco más complejo.Hablar de un load balancer en el mundo de kubernetes es hablar de dos términos que van unidos:
+1º
+Voy a tener que entender que crear este balanceador va a ser algo un poco más complejo.Hablar de un load balancer en el mundo de kubernetes es hablar de dos términos que van unidos:
+
+1º: load balance service <- dice a kubernetes como alcanzará al cloud provider y adicionalmente provee un balanceador de carga.La meta de ese balanceador de carga es mandar  el tráfico a UN ÚNICO POD.Hasta ahora habiamos creado objetos dentro del cluster,pero el servicio balanceador es un poco diferente,es un objeto que pertenece afuera del  cluster.Además,es ese load balancer service el que va a decir al clúster como comportarse, y como va a alcanzar a su cloud provider(AWS,GoogleCloud,MicrosoftAzure....).Recuerda que son estos providers los que van a proporcionar el balanceador(no confundir el balanceador con el servicio,ver imagen 38)Este balanceador provisto por GoogleCloud Azure... existe totalmente afuera del cluster
+Asi que podemos decir que el objetivo del servicio load balancer es decirle al cluster que vaya a su provider,el cual le va a proporcionar un load balancer a ese cluster.Fijate que el load balancer con quien se va a comunicar es con el ingress controller
+
+2º: ingress o ingress controller: un pod con una serie de reglas de enrutamiento para distribuir el tráfico entre los otros servicios(técnicamente el ingress y el ingress controller son cosas diferentes,aunque no para propósitos de este curso.Este servicio se pondrá en el medio del load balancer provisto por el servicio cloud y se comunicará con los clusterip,accediendo asi a los pods
+
+							VIDEO 85 INSTALLING INGRESS-NGINX
+
+Vamos a hacer uso de una libreria open-source que va a crear un servicio load balancer + un ingress automáticamente.IMPORTANTE: hay otro proyecto con un nombre casi idéntico que se llama kubernetes-ingress(sin embargo pertenece a otra organización,etc...).Cuando esté buscando por información debo asegurarme que es ingress-nginx y no kubernetes-ingress
+Puedo acceder a través del repo de github pero al final tengo que ir a https://kubernetes.github.io/ingress-nginx/
+
+Una vez alli debo seguir los pasos de instalación en base a como esté usando kubernetes,por ejemplo en Win y Mac me va a pedir que aplique este:
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v0.46.0/deploy/static/provider/cloud/deploy.yaml
+Este deploy va a crear un montón de objetos asi que es buena idea echar un vistazo a lo que va a crear antes.
+Para minikube parece que es tán fácil como usar minikube addons enable ingress
+
+				VIDEO 86 WRITTING INGRESS CONFIG FILES
+
+Vamos a escribir algunas reglas en un archivo de configuración.Este archivo va a ser automáticamente descubierto por el ingress-controller que actualizará su set interno de reglas con este archivo en cuanto lo descubra.Lo vamos a llamar ingress-srv.yaml:
+
+apiVersion: networking.k8s.io/v1beta1 < esto va a cambiar
+kind: Ingress <- va a ser de tipo Ingress 
+metadata:  
+  name: ingress-srv
+  annotations: <- el ingress-controller va a estar buscando por esta anotación para actualizar reglas
+    kubernetes.io/ingress.class: nginx 
+spec:
+  rules:  <- reglas a aplicar
+    - host: posts.com <- por el momento vamos a dejar este posts.com 
+      http: 
+       paths: 
+        - path: /posts
+          backend: 
+            serviceName: posts-clusterip-srv <- queremos que lo que entre por /posts lo atienda esta IP!
+            servicePort: 4000
+
+Ya sólo queda aplicarlo.
+POSIBLES ERRORES/CONSEJOS:
+1º puedo ver la version tanto del cliente como del servidor con (k version --short):
+> kubectl version --short
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ kubectl version --short
+Client Version: v1.21.0
+Server Version: v1.20.2 
+
+ERROR 1 <- usar una API desfasada
+Using the new version networking.k8s.io/v1  is recommended, but when you follow lecture 118 - build and deploy our app to Google Cloud ,this will fail with the following error
+
+ - stderr: "error: unable to recognize 
+ ticketing\\\\infra\\\\k8s\\\\ingress-srv.yaml\": no matches for kind \"Ingress\" in version \"networking.k8s.io/v1\"\n"
+  - cause: exit status 1
+	The reason for this error is that, at the moment Google Cloud's latest Kubernetes version is v1.18.12 while in order to use networking.k8s.io/v1 we need v1.19+
+
+	$ kubectl version --short
+	Client Version: v1.19.3
+	Server Version: v1.18.12-gke.1210
+	Reference: https://github.com/kubernetes/kubernetes/issues/90077
+
+	My local machine is installed with v1.19.3, so it can support networking.k8s.io/v1. But when deploying the app to Google Cloud using Skaffold, I need to change back to v1beta1.
+
+No cambiar la version v1beta por v1 de momento!Con el tiempo ni siquiera van a soportar la API v1 más...
+
+ERROR 2 usar o no usar Strings
+annotations: 
+  kubernetes.io/ingress.class: "nginx" <- es posible que pida un string
+
+PARTE ADICIONAL: COMPROBAR TODO
+Puedo ver que ha creado ingress-controllers con :
+>kubectl get svc -n ingress-nginx
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ kubectl get svc -n ingress-nginx
+NAME                                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             NodePort    10.104.225.217   <none>        80:32547/TCP,443:32756/TCP   34m
+ingress-nginx-controller-admission   ClusterIP   10.106.37.162    <none>        443/TCP                      34m
+
+
+Con kubectl get -A ValidatingWebhookConfiguration puedo ver los WEBHOOKS:
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ kubectl get -A ValidatingWebhookConfiguration
+NAME                      WEBHOOKS   AGE
+ingress-nginx-admission   1          37m
+
+Con k get pods -n ingress-nginx salen varios pods
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ kubectl get pods -n ingress-nginx
+NAME                                        READY   STATUS      RESTARTS   AGE
+ingress-nginx-admission-create-7hj8j        0/1     Completed   0          40m
+ingress-nginx-admission-patch-mnfww         0/1     Completed   0          40m
+ingress-nginx-controller-5d88495688-kdv6p   1/1     Running     0          40m
+
+							VIDEO 87 NOTE ABOUT PORT 80
+
+Para determinar qué tengo en el puerto 80 puedo usar estos comandos:
+Mac/unix:
+>sudo lsof -i tcp:80
+Para Windows :
+>netsat -aon | findstr :80
+Los usuarios de minikube(pero en Windos y Mac) no pueden usar el docker driver,pues no es compatible con el ingress
+
+							VIDEO 88 HOST FILE TWEAK
+
+Con kubernetes podemos hostear un montón de infraestructura,no estamos limitados a hostear una única aplicación(podriamos albergar my-app.com,blog-app.com,post-tracker-com,...)En otras palabras podemos albergar diferentes dominios
+Bien,volviendo a la linea donde tenemos host: posts.com vamos a tener que engañar a nuestra máquina para que sirva a localhost cuando pongamos posts.com.Recordando donde esta ese archivo tenemos:
+
+1- Windows: C:\Windows\System32\Driver\etc\hosts
+2- Mac/Linux: /etc/hosts 
+
+IMPORTANTE!: si estoy en minukube no voy a resolver 127.0.0.1 a posts.com sino que va a ser la IP de minikube(minikube ip)192.168.49.2 de momento:
+
+127.0.0.1       localhost
+127.0.1.1       acer-linux
+#161.22.41.84    pablo.peladonerf.com 
+192.168.49.2 posts.com <- para los demas será 127.0.0.1
+
+Ahora si,ya puedo hacer una peticion a ese virtual host: 
+>curl -i http://posts.com/posts -i viene con el body, -I solo la cabecera de la request
+
+Puedo ver que me devuelve un objeto vacío,lo cual cerciora de que el ingress funciona perfectamente.Sin embargo,aún falta poder acceder al resto de servicios,y es lo que haremos.Adicionalmente,también nos falta un deployment para la aplicacion de React
+
+							VIDEO 89 ADDING ONE LINE FOR USING CREATE-REACT-APP IN A DOCKER CONTAINER
+
+Important Note to Add Environment Variable
+The next video is going to show the deployment of the React app to our Kubernetes cluster.  The React app will be running in a Docker container.
+
+Unfortunately, create-react-app currently has a bug that prevents it from running correctly in a docker container.  Create-react-app does have an open issue tracking this: https://github.com/facebook/create-react-app/issues/8688
+
+To solve this, we have to make a small update to the Dockerfile in the client folder.  Find the Dockerfile in the client folder and make the following change:
+
+FROM node:alpine
+ 
+#Add the following line 
+ENV CI=true
+  
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY ./ ./
+	 
+CMD ["npm", "start"]
+Then save the file.  That's it!  Continue on to the next video.
+
+Habria que hacer un rebuild y un push al repo además de un rollout restart deployment,pero parece que el problema fue resuelto.
+Tip: puedo ver los namespaces con k get namespaces:
+
+oscar@acer-linux:~/Escritorio/MicroserviciosUdemy/01blog/infra/k8s$ k get namespaces
+NAME                   STATUS   AGE
+default                Active   10d
+ingress-nginx          Active   117m
+kube-node-lease        Active   10d
+kube-public            Active   10d
+kube-system            Active   10d
+kubernetes-dashboard   Active   10d
+
+Sabiendo los namespaces puedo ver los pods,servicios,etc en base a ese namespace(con la flag -n):
+>k get pods -n kube-system <- los pods de ese namespace
+Por defecto estamos en el namespace 'default'
+
+							VIDEO 90 DEPLOYING THE REACT APP
+
+Vamos a empezar a construir el pod para la app de React.Primero tenemos que asegurarnos que la app ya no hace ninguna petición a localhost sino al virtual host que hemos creado.Una vez actualizadas las url de las peticiones  hay que crear una nueva imagen y despues habrá que crear el archivo de configuración con un deployment y el clusterip
+
+							VIDEO 91 UNIQUE ROUTE PATHS
+
+Vamos a tener que crear reglas para el ingress controller para todas las peticiones que puedan hacerse desde el frente:
+> POST/posts <- nuestra app puede venir por post a /post al crear un post (va al pod posts)
+> POST/posts/:id/comments <- al crear un comentario viene por post a /posts/:id/comments (va al pod comments)
+> GET/posts <- puede pedir todos los posts por get a /posts (para el pod query)
+> GET/ <-  puede hacer peticiones por get a / simplemente (este es para la app de React)
+
+Hay una mala noticia,y es que el ingress-controller no puede distinguir entre verbos en las peticiones,para él solo es /posts o /comments,no distingue si es por GET o POST.Asi que la solución es cambiar el path de una de las dos peticiones que van a /posts.
+En otras palabras hay que cambiar dos imagenes ahora mismo para solucionar este problema(vamos a cambiar a microservicio post que la ruta sea /posts/create)Obviamente hay que rebuildear,rollout,etc...
+
+  const handleSubmit = async event => {
+	  //  event.preventDefault();
+		 
+		     // await axios.post("http://localhost:4000/posts", { title });
+				     await axios.post("http://posts.com/posts/create", { title });  AÑADO CREATE EN EL SUBMIT EN LA APP DE REACT
+						     setTitle("");
+								   };
+
+
+
+app.post('/posts/create',async(req, res) => {  <- en el index del post
+   const id = randomBytes(4).toString('hex');
+	    const { title } = req.body;
+
+Hay que rebuildear todo.Recuerda que también hay que restartear el deployment.			
+NOTA: en breve vamos a ver una herramienta que va a automatizar el proceso de rebuild y redeploy.
+
+					VIDEO 92 FINAL ROUTE CONFIG
+
+Ahora que tenemos rutas únicas crearemos el archivo de configuración.En el archivo anterior vamos a añadir más elmentos al array 'paths':
+IMPORTANTE: nginx no soporta los mismos wildcards que Javascript(/posts/:id/comments), ese ':id' es de Javascript.En vez de eso hay que usar una expresión regular:
+  - path: /posts/?(.*)/comments <- acepta cualquier valor mientras sea seguido por /comments
+IMPORTANTE: para poder usar expresiones regulares hay que pasar además una linea adicional al archivo yaml en la seccion 'annotations':
+
+annotations:
+   kubernetes.io/ingress.class: nginx
+	 nginx.ingress.kubernetes.io/use-regexp: 'true'
+
+Los paths además están de más importante a menos importante,es como React Router,si pongo primero el path a / todos van a hacer match,asi que hay que tener en cuenta la especificidad de la ruta,poniendo la menos especifica al final:
+
+ paths: 
+  - path: /posts/create
+    pathType: Prefix
+    backend: 
+     serviceName: posts-clusterip-srv
+     servicePort: 4000
+  - path: /posts
+    pathType: Prefix
+    backend: 
+     serviceName: query-srv
+     servicePort: 4002
+  - path: /posts/?(.*)/comments
+    backend: 
+     serviceName: comments-srv
+     servicePort: 4001 
+  - path: /?(.*)
+    backend: 
+     serviceName: client-srv
+     servicePort: 3000
+
+Ahora hay que aplicar el archivo de nuevo.		 
+
+
+					VIDEO 92 INTRODUCING & INSTALLING SKAFFOLD
+
+Skaffold es una herramienta de linea de comandos que voy a usar para automatizar diferentes tareas en un ambiente de desarrollo de kubernetes.No se puede usar skaffold en producción.Skaffold me va a permitir las siguiente ventajas: 
+1ª: Hace superfácil actualizar código en un running pod 
+2ª: hace muy fácil crear y borrar diferentes objetos atados a un proyecto(aqui no lo veré ya que estoy en un único cluster).Es decir permite cambiar entre sets de objetos de forma rápida
+Lo mejor es verlo en acción asi que voy a su web https://skaffold.dev/ y alli sigo los pasos de instalación para ubicar el ejecutable en /usr/local/bin 
+Nota: para instalarlo en Windows se usa choco install skaffold en principio
+
+							VIDEO 93 SKAFFOLD SETUP
+
+Para asegurarme que tengo instalado skaffold simplemente puedo digitar 'skaffold' en la terminal.Debería mostrar la ayuda para los comandos y nada de 'comando no reconocido'.Para configurarlo vamos a necesitar otro fichero.Este fichero va a decir a skaffold como debe manejar todos los subprocesos del cluster
+Este archivo lo voy a crear en la raiz del proyecto,y, obviamente, va a ser un .yaml:
+Nota: date cuenta que ese archivo es para skaffold,no tiene nada que ver con kubernetes:
+
+apiVersion: skaffold/v2alpha3
+kind: Config
+deploy:
+  kubectl: 
+	  manifests:
+		  - ./infra/k8s/* <- esto le dice a skaffold  donde estan los archivos de configuracion y le pone a la escucha por algun cambio en alguno de ellos,y si lo hay skaffold automáticamente hace el deploy.También va a crear los objetos al arrancar skaffold y borrarlos al pararlo(crea/borra los objetos simplemente) 
+
+build:
+  local:
+	  push: false <- cada vez que se haga un cambio skaffold tratará de hacer un push a dockerhub,no queremos que haga eso
+IMPORTANTE: YO LO NECESITO A TRUE!!
+
+  artifacts: 
+	  - image: oscargm40/client-service
+		  context: client <- es el nombre del folder/proyecto 'client'
+			docker:
+			  dockerfile: Dockerfile
+		  sync: 
+			  manual:
+				  - src: 'src/**/*.js'
+					  dest: . <- la sección artifacts informa a skaffold de algo que queremos que mantenga.Cuando hagamos un cambio a un .js skaffold va a tratar de meter el codigo dentro,cuando sea un cambio a otro archivo si va a hacer un rebuild completo 
+Ya solo me falta duplicar esta 'rule' para todos los servicios,no sólo para el cliente.
+
+    - image: oscargm40/comments-service
+      context: comments
+      docker: 
+        dockerfile: Dockerfile
+      sync:
+        manual:
+         - src: '*.js'
+           dest: .
+
+Fijate que no hace falta entrar a src/,eso era solo para React. 
+
+Para arrancar skaffold me situo a la altura de la raiz del archivo(donde esté el skaffold.yaml):
+>skaffold dev
+
+				VIDEO 96	NOTES ABOUT SKAFFOLD
+
+IMPORTANTE: fijate que create-react-app va a hcer un rebuild cada vez que haya un cambio y que sucede lo mismo con las aplicaciones node ya que las estoy ejecutando con nodemon.ES POR ESTO QUE VEO LOS CAMBIOS, y no por skaffold,que aunque si actualiza no es el responsable de refrescar la aplicacion correctamente.
+En resumen,se necesitan dos niveles de actualización.
+
+NOTA: desde ahora tendré que apagar skaffold con CTRL + C.Esto va a borrar todos los pods,deployments y services.
+Por el momento podemos decir que hemos terminado con la primera app.

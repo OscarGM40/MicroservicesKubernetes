@@ -1,0 +1,3 @@
+					BASICS OF TYPESCRIPT
+
+El mayor objetivo de Typescript es ver los errores en el editor,antes de que se compile el TS a JS.
