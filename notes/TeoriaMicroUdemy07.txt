@@ -131,4 +131,92 @@ Ahora que ya tenemos implementada la OCC iremos al common module y agregaremos e
 
 				VIDEO 390 WHO UPDATES VERSIONS?
 
+¿Quien debe usar las versiones?Solo el  servicio PRINCIPAL responsable de grabar cualquier acción create/update/destroy debe emitir la versión también.NO los que lo reciban.Por ejemplo,en la primera app teniamos el Comment Srv,el Moderation Srv y el Query Srv,pues bien,sólo el Comment Srv puede cambiar la versión,ya que si recordamos el fluo primero se creaba un Comment,se Moderaba y despues iba al Query Srv que lo almacenaba.
+Imaginate que el ModerationSrv también cambia la versión al moderarlo,esto no irá así en Microservicios,sólo habrá un Servicio responsable de versionar.En nuestro caso será Tickets srv,pero incluso si llama a otros que realicen alguna operación auxiliar,seguirá siendo él,el Tickets Srv,el que maneje las versiones(puede realizar un cambio tras recibir el Ticket tras esa operación auxiliar,pero será él y no ese servicio auxiliar).
+En resumen debe estar centralizada en el srv principal la lógica del versionamiento.
+NOTA:estos otros servicios auxiliares si que pueden incluir el campo 'version',pero no podrán cambiarlo.
+
+Con todo esto en mente cambio las 4 clases del common module y le agrego el field version:number.Actualizo la dependencia en los srv Orders y Tickets.
+
+				VIDEO 392 UPDATING TICKETS EVENT DEFINITIONS
+
+Donde emitamos un evento le agrego version: ticket.version y ejecuto de nuevo la suite de tests.En el Tickets Srv no habrá problemas pero en el Orders hay varias cosas que hacer,pues ni siquiera tenemos esta propiedad en el Schema.
+Fijate que hemos dejado la DB y la publicación por parte del Tickets srv bien,pero el orders va a tener bastante trabajo.
+
+				VIDEO 394 APPLYING A VERSION QUERY
+
+Vamos a instalar el plugin para Optimistic Concurrency Control en el Orders Srv:
+npm i mongoose-update-if-current
+Lo vamos a conectar al Schema Ticket,no al Order.
+import { updateIfCurrentPlugin } from "mongoose-update-if-current"
+
+TicketSchema.set('versionkey','version');
+TicketSchema.plugin(updateIfCurrentPlugin);
+
+Vayamos por los Listeners,tienen que recibir esta propiedad.También recuerda que no vamos a buscar por id más,sino por el id + version-1:
+
+ // const ticket = await Ticket.findById(data.id); <- ya no será así
+
+      const ticket = await  Ticket.findOne({ 
+         _id: data.id,
+         version: data.version - 1
+      })
+
+Despues de encontrar o no ese ticket le cambiaremos el price y/o title y lo guardaremos:
+  const { title, price } = data;
+      ticket.set({ title, price });
+      await ticket.save();
+NOTA: es cuando hagamos ese await ticket.save() cuando se incrementará el número de version,ya que acabamos de conectar el plugin a este ticketSchema también,asi que lo hará mongoose por nosotros.
+
+Nos logeamos y creamos y actualizamos un ticket con Postman.Puedo ver que la version es guardada e incrementada por el Tickets srv,y que el Orders recibe el evento.
+
+					VIDEO 395 DID IT WORK?
+
+Vamos a realizar el mismo test que antes,creando un ticket,actualizando su price a 10$ y despues a 15$.Esta vez esperamos que el await Ticket.findOne({ _id:data.id,version:data.version -1}) falle en su busqueda y arroje el throw new Error().
+Al suceder esto no se llamara al msg.ack() y NATS lo re-emitirá al de 5s.
+Además que pararán los logs unos segundos puedo apreciar los Errores por consola,y como despues se re-emiten.
+Por último Stephen ejecutó db.tickets.find({price:15}).length() en ambos y tiene 400,no se ha perdido ni uno,asinto.
+
+NOTA: hay gente que se le está cerrando NATS por ese throw new Error:
+
+NATS closing connection when throwing an error
+2 votos
+Martin · Clase 395 · hace 11 meses
+I'm noticing that if I throw an error inside of my listener it's actually closing the NATS connection alltogether rather than simply not ackgnowledging the message.
+
+For now I've switched to
+
+if (!ticket)
+      return console.log(`Ticket version ${version} coming in out of order`)
+
+ratehr than throwing an error and it's working as expected now... Any ideas why it's behaving this way? Obviously it's not ideal if NATS is closing the connection any time a listener errors!
+
+Cambiar a un return ... si me sucede 
+
+					VIDEO ABSTRACTED QUERY METHOD
+
+Realmente a Stephen no le gusta la sintaxis de la query con el findOne,asi que vamos a crear un nuevo método en el modelo Ticket cual prehistorics. 
+NOTA:fijate en este nuevo conocimiento,puedo pasar a un argumento que sea un objeto con ciertas propiedades:
+
+interface TickeModel extends mongoose.Model<TicketDoc> {
+  build(attrs:TicketAttrs):TicketDoc
+  findByEvent(event:{id:string,version:number}):Promise<Ticketdoc | null> <- null porque puede que no lo encuentre(es lo que devolverá findOne)
+
+* el argumento event debe ser un objeto con las propiedades id y version
+Realmente ese argumento event podría tener más propiedades,pero tienen que tener id y version fijo.Con esto en mente puedo crear un método estático:
+TicketSchema.statics.findByEvent = (event:{id:string,version:number}) => {
+  return Ticket.findOne({
+    _id: event.id,
+    version: event.version - 1,
+  }) }
+
+Ahora ya es sustituir,asin:
+const ticket = await Ticket.findByEvent(data) ;
+Hacemos una nueva prueba con postman y veo que todo funciona igual.Fijate lo fácil que es crear método estáticos o de instancia en un Model,etc...
+
+			VIDEO 397 OPTIONAL VIDEO - VERSION WITHOUT UPDATE IF CURRENT
+
+
+
+
 

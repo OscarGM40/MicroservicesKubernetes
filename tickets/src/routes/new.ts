@@ -39,6 +39,7 @@ router.post('/api/tickets', requireAuth,
                title: ticket.title,
                price: ticket.price,
                userId: ticket.userId,
+               version: ticket.version,
             });
          await SESSION.commitTransaction();
          res.status(201).send(ticket);
