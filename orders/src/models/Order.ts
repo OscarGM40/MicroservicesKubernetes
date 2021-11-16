@@ -1,7 +1,6 @@
-
-
-import { OrderStatus } from '@oscargmk8s/common';
 import mongoose from 'mongoose';
+import { updateIfCurrentPlugin } from 'mongoose-update-if-current';
+import { OrderStatus } from '@oscargmk8s/common';
 import { TicketDoc } from './Ticket';
 
 export { OrderStatus };
@@ -36,7 +35,7 @@ const OrderSchema = new mongoose.Schema({
    expiresAt:{ type: mongoose.Schema.Types.Date },
    ticket:{type: mongoose.Schema.Types.ObjectId,ref:'Ticket'}
 },{
-   versionKey:false,
+   // versionKey:false,
    toJSON:{
       transform(doc,ret){
          ret.id = ret._id;
@@ -44,6 +43,9 @@ const OrderSchema = new mongoose.Schema({
       }
    }
 })
+
+OrderSchema.set('versionKey','version');
+OrderSchema.plugin(updateIfCurrentPlugin);
 
 OrderSchema.statics.build = (attrs:OrderAttrs) => {
    return new Order(attrs);

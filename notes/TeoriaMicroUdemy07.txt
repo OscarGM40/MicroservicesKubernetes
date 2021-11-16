@@ -216,7 +216,159 @@ Hacemos una nueva prueba con postman y veo que todo funciona igual.Fijate lo fá
 
 			VIDEO 397 OPTIONAL VIDEO - VERSION WITHOUT UPDATE IF CURRENT
 
+Es importante entender que usar este plugin conlleva consecuencias.Para nuestra app no será importante,pero imaginate que en un futuro el Tickets srv ya no usa MongoDb y usa SQL o se decide que no vaya de 1 en 1 el field 'version'.
+En este caso tendríamos un problema,ya que el plugin trabaja sólo y va a incrementar la versión tal como tiene él programado.
+O también imagina que usan el campo 'version' con la fecha.
+Este video es para configurar todo sin usar el plugin.
+
+				VIDEO 398 TESTING LISTENERS
+
+Dentro de cada test de un LIstener vamos a realizar lo mismo,crear una instancia de la clase que heredaba del common module,crear la data para el onMessage y alli afirmaremos que cree el ticket,lo actualice,no lo encuentre,...
+
+*Dado que hay código repetitivo puedo crear una función inicial con el setup que comparta cada test.
+const setup = async () => {
+   // create an instance of the listener
+
+   // create a fake data event
+
+   // create a fake message object so I can call ack
+}
+
+it('creates and saves a ticket', async () => {
+   // call the onMessage function with the data object and the fake message object
+   
+   // write assertions to make sure a ticket was created
+});
+
+it('acks the message', async () => {
+   // call the onMessage function with the data object and the fake message object
+
+   // write assertions to make sure the ack function is called
+})
+
+					VIDEO 399 IMPLEMENTING THE TEST
+
+Fijate que voy a guardar en la InMemoryDB(aunque esté en un ambiente de tests,estoy usando MongoDB) asi que debo pasar ids válidos:
+
+ const data: TicketCreatedEvent['data'] = {
+    version: 0,
+    id: new mongoose.Types.ObjectId().toHexString(),
+    title: 'concert',
+    price: 10,
+    userId: new mongoose.Types.ObjectId().toHexString()
+ };
+
+Fijate que para pasar el msg:Message TS me va a pedir que implemente un montón de métodos.Realmente no lo necesito para las pruebas,asi que vamos a ignorar a TS:
+   
+   // create a fake message object so I can call ack
+   // @ts-ignore
+      const msg:Message  = {
+         ack: jest.fn()
+   }
+Realmente es una opción correcta ignorarle en este contexto.Fijate que tengo que hacer el return de estos tres objetos!:
+const setup = async () => {
+  ...
+  return { listener, data, msg };
+}
+Dadi que lo que vamos a hacer es publicar esa data y crear un ticket simplemente podemos esperar que encontraremos uno con ese id,ese precio,etc...
 
 
+it('creates and saves a ticket', async () => {
+   const { listener, data, msg } = await setup();
+   // call the onMessage function with the data object and the fake message object
+   listener.onMessage(data, msg);
+   // write assertions to make sure a ticket was created(buscar uno con el id que me mandó el evento)
+   const ticket = await Ticket.findById(data.id);
+   expect(ticket).toBeDefined();
+   expect(ticket!.title).toEqual(data.title);
+   expect(ticket!.price).toEqual(data.price);
+});
+El otro test era expect(msg.ack().toHaveBeenCalled().Todo perfecto.
+
+				VIDEO 401 TESTING THE TICKET UPDATED LISTENER
+
+Es importante entender que el setup va a ser más complejo,ya que hay alguna propiedad que necesita un valor en específico:
+
+const setup = async () => {
+   const listener = new TicketUpdatedListener(natsWrapper.client);
+   // create and save a ticket(si es un update habrá que crear un nuevo ticket,asinto -_-)
+   const ticket = Ticket.build({
+      id:  mongoose.Types.ObjectId().toHexString(),
+      title: 'concert',
+      price: 20,
+   });
+   await ticket.save();
+
+   // create a fake data object
+   const data: TicketUpdatedEvent['data'] = {
+      version: ticket.version + 1,
+      id: ticket.id,
+      title: 'concert two',
+      price: 20,
+      userId: new mongoose.Types.ObjectId().toHexString()
+   };
+
+   // create a fake message object so I can call ack
+   // @ts-ignore
+      const msg:Message  = {
+         ack: jest.fn()
+   }
+   // return all of this stuff
+   return { listener, data, msgi,ticket };
+}
+
+Fijate que hay que crear un ticket,guardarlo y despues cambiarle algo y aumentarle la versión,si no fallará.Además lo retornamos también,por que no? jaja.Putos pros
+
+				VIDEO 402 SUCCESS CASE TESTING
+
+Recuerda que es lo que retorna mi función asyn setup():
+
+   return { listener, data, msg, ticket };
+}
+
+it('finds,updates and saves a ticket', async () => {
+   const { listener, data, msg, ticket } = await setup();
+   *aqui es donde se actualiza
+   await listener.onMessage(data, msg);
+
+   const updatedTicket = await Ticket.findById(ticket.id);
+   expect(updatedTicket!.title).toEqual(data.title);
+   expect(updatedTicket!.price).toEqual(data.price);
+   expect(updatedTicket!.version).toEqual(data.version);
+})
+
+it('acks the message', async () => {
+   const { listener, data, msg } = await setup();
+
+   await listener.onMessage(data, msg);
+
+   expect(msg.ack).toHaveBeenCalled();
+})
+Fijate como para ver si se llama a msg.ack() no necesito el ticket.Es buena idea hacer que fallen también,comentando la llamada al onMessage y viendo que falla el test,no hagas solo el 'camino feliz'.
+
+					VIDEO 403 OUT OF ORDER EVENT
+
+ No hemos comprobado que sucede si la version no encaja,tenemos que testear que no se llame a msg.ack si hay un fallo en el numero de versión:
+
+it('does not call ack if the event has a skipped version number', async () => { 
+   const { listener, data, msg, ticket } = await setup();
+
+   data.version = 10;
+
+   try {
+      await listener.onMessage(data, msg);
+   } catch (err) {}
+
+   expect(msg.ack).not.toHaveBeenCalled();
+});
+
+En el sigiente video conectaremos el plugin al OrderSchema:
+
+OrderSchema.set('versionKey','version');
+OrderSchema.plugin(updateIfCurrentPlugin);
+
+REcuerda que hay que agregar el field 'version' a la interfaz que extiende de Document.
+
+			VIDEO 406 FIXING A FEW TESTS
 
 
