@@ -9,12 +9,6 @@ jest.mock('../../nats-wrapper')
 
 const ticketId = mongoose.Types.ObjectId();
 
-const newTicket = {
-   id: "asdf",
-   title: 'concert',
-   price:20,
-}
-
 it('returns an error if the ticket does not exist', async () => {
    // desde la version 6 de mongoose es con 'new mongoose.Types.ObjectId()'
 
@@ -27,7 +21,11 @@ it('returns an error if the ticket does not exist', async () => {
 })
 
 it('returns an error if the ticket is already reserved', async () => {
-   const ticket = Ticket.build(newTicket);
+   const ticket = Ticket.build({
+      id: ticketId.toHexString(),
+      title: 'concert',
+      price: 20,
+   });
    await ticket.save();
 
    const order = Order.build({
@@ -47,22 +45,22 @@ it('returns an error if the ticket is already reserved', async () => {
 
 it('reserves a ticket', async () => {
    const ticket = Ticket.build({
-      id:'sdjflk',
+      id: new mongoose.Types.ObjectId().toHexString(),
       title: 'concert',
       price: 20
    });
    await ticket.save();
 
    await request(app)
-      .post('/api/orders')
-      .set('Cookie', global.signin())
-      .send({ ticketId: ticket.id })
+   .post('/api/orders')
+   .set('Cookie', global.signin())
+   .send({ ticketId: ticket.id })
       .expect(201);
-})
-
-it('emits an order created event', async () => {  
-   const ticket = Ticket.build({
-      id:'slkdfj',
+   })
+   
+   it('emits an order created event', async () => {  
+      const ticket = Ticket.build({
+      id: new mongoose.Types.ObjectId().toHexString(),
       title: 'concert',
       price: 20
    });

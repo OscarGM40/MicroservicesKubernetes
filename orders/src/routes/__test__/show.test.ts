@@ -2,12 +2,14 @@ import request from 'supertest';
 import { app } from '../../app';
 import { Order } from '../../models/Order';
 import { Ticket } from '../../models/Ticket';
+import mongoose from 'mongoose';
 
 jest.mock('../../nats-wrapper')
 
 it('fetches the order', async () => {
    // Create a ticket 
    const ticket = Ticket.build({
+      id: new mongoose.Types.ObjectId().toHexString(),
       title: 'concert',
       price: 20
    });
@@ -31,6 +33,7 @@ it('fetches the order', async () => {
 it('returns an error if one user tries to fetch another user\'s orders', async () => {
    // Create a ticket 
    const ticket = Ticket.build({
+      id: new mongoose.Types.ObjectId().toHexString(),
       title: 'concert',
       price: 20
    });

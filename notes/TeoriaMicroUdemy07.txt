@@ -371,4 +371,11 @@ REcuerda que hay que agregar el field 'version' a la interfaz que extiende de Do
 
 			VIDEO 406 FIXING A FEW TESTS
 
+ Es simplemente poner el id y la version donde TS lo diga,cual asintos.
 
+			VIDEO 407 TICKET SRV LISTENING TO ORDER EVENTS
+
+Ya hemos testeado que el Orders Srv recibe los eventos ticket:created y ticket:updated e incluso hemos testeado que emita los order:created y order:updated.
+Realmente el Tickets srv debe escuchar por estos eventos,y aún no lo hace.
+Esto es así porque necesita saber que un ticket ha sido reservado,para bloquearlo y que por ejemplo no cambie el precio misteriosamente en el último momento...
+Recuerda que además el Payments Srv también necesita conocer las Orders que pueden ser resueltas en un pago y el Expiration srv necesita conocer también las órdenes para bloquearlas 15 minutos.
