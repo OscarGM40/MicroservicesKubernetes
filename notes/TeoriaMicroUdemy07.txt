@@ -379,3 +379,125 @@ Ya hemos testeado que el Orders Srv recibe los eventos ticket:created y ticket:u
 Realmente el Tickets srv debe escuchar por estos eventos,y aún no lo hace.
 Esto es así porque necesita saber que un ticket ha sido reservado,para bloquearlo y que por ejemplo no cambie el precio misteriosamente en el último momento...
 Recuerda que además el Payments Srv también necesita conocer las Orders que pueden ser resueltas en un pago y el Expiration srv necesita conocer también las órdenes para bloquearlas 15 minutos.
+
+
+import { Listener, OrderCreatedEvent, Subjects } from "@oscargmk8s/common";
+import { Message } from "node-nats-streaming";
+import { queueGroupName } from './queue-group-name';
+
+export class OrderCreatedListener extends Listener<OrderCreatedEvent> {
+   readonly subject = Subjects.OrderCreated;
+   queueGroupName = queueGroupName;
+
+   async onMessage(data: OrderCreatedEvent['data'], msg: Message){
+
+   }
+}
+
+				VIDEO 408 STRATEGIES FOR LOCKING A TICKET
+
+La opción más sencilla sería una campo isLocked:boolean,pero veremos que se queda corta:
+1- Puede saber el dueño del ticket quién o el estado de la orden? No,sólo sabría que el ticket está bloqueado.Asi que vamos a guardar el orderId de la 	ordén que lo está reservando para que pueda ver esa información.
+ASi pues vamos a usar la presencia de una orderId para determinar si un ticket está reservado o no(por defecto será null) 
+Claro que esto me hará cambiar el Document del TicketShema agregando este campo aentre otros menores cambios
+
+					VIDEO 409 RESERVING A TICKET
+
+Dado que es una propiedad opcional hay que especificarlo también,asin:
+
+interface TicketDoc extends Document {
+   title: string;
+   price: number;
+   userId: string;
+   version: number;
+   orderId?: string;
+}
+
+Ahora ya podemos crear la lógica que guardará esta nueva propiedad cuando suceda el evento Order:created:
+
+  async onMessage(data: OrderCreatedEvent['data'], msg: Message){
+      // find the ticket that the order is reserving
+      const ticket = await Ticket.findById(data.ticket.id);
+      // if no ticket, throw error
+      if(!ticket){
+         throw new Error('Ticket not found');
+      }
+      // mark the ticket as reserved by setting its orderId
+      ticket.set({ orderId: data.id });
+      // save the ticket
+      await ticket.save();
+      // ack the message
+      msg.ack();
+   }
+}
+Busco el ticket,controlo que no se encuentre y le añado la prop,por último doy fé de la recepción del evento publicado.
+
+				VIDEO 410 SETUP FOR TESTING RESERVATION
+
+Vamos a seguir los mismos pasos que en el testeo de los listener del Orders srv(crear una primera función para el setup,etc...)
+Fijate que cuando testee el created tendré que crear un ticket o una orden,payment,etc...
+
+const setup = async () => {
+   const listener = new OrderCreatedListener(natsWrapper.client);
+   const ticket = Ticket.build({
+      title: 'concert',
+      price: 99,
+      userId: 'asdf',
+   });
+   await ticket.save();
+   const data: OrderCreatedEvent['data'] = {
+      id: mongoose.Types.ObjectId().toHexString(),
+      version: 0,
+      status: OrderStatus.Created,
+      userId: 'asldkfj',
+      expiresAt: 'alskdfj',
+      ticket: {
+         id: ticket.id,
+         price: ticket.price,
+      }
+   };
+   // @ts-ignore
+      const msg:Message  = {
+         ack: jest.fn()
+   }
+   return { listener,ticket, data, msg };
+}
+De nuevo fijate que cuando sea el created hay que devolver esa instancia también.Fijate que hay propiedades que no necesitan más que cumplir el tipado como userId.
+NOTA: puedo mantener CTRL al hacer hover sobre cualquier elemento para ver información más detallada en VSCODE
+
+						VIDEO 411 TEST IMPLEMENTATION
+
+Ahora que ya tenemos la función init podemos crear los tests.
+
+
+it('should set the userId of the ticket', async () => {
+   const { listener,ticket, data, msg } = await setup();
+   // call the onMessage function with the data object and the fake message object
+   await listener.onMessage(data, msg);
+   // write assertions to make sure a ticket was created(buscar uno con el id que me mandó el evento)
+   const updatedTicket = await Ticket.findById(ticket.id);
+   expect(updatedTicket!.orderId).toEqual(data.id);
+});
+
+El segundo es asegurarse que se llama al ack().Fijate como lo que hay que mirar es que la nueva propiedad orderId sea igual al data.id que es el id de la orden.
+Por último siempre hay que tratar de que la prueba falle,Stephen comenta que me puede ayudar mucho hacer una pequeña prueba forzando algún fallo.
+Fijate que es la recepción del listener lo que creará este fiel:
+await listener.onMessage(data, msg); <- la lógica de la recepción crea el field
+Realmente no se trata de sólo escuchar por acciones,sino de estar a la espera de que algo suceda para poder realizar cualquier tipo de lógica/acción por ello.
+
+						VIDEO 412 MISSING UPDATE EVENT
+
+Tal como está el código hay un problema con las versiones.Imagina que se crea un ticket(version 0),se reserva y por ello se añade una nueva propiedad,mongoose-update-if-current va a detectar este cambio e incrementar la versión(v1),despues se cancela esa reserva(v2) y el dueño decide subir el precio(v3).
+A nuestro Orders srv sólo le ha llegado el Ticket:created(con v0) y ahora le esta llegando un ticket:updated con version 3.
+
+La solución es bien fácil,y es emitir un evento al Orders srv cada vez que se haga un cambio en el Ticket(no sólo al crearlo):
+
+// mark the ticket as reserved by setting its orderId
+ticket.set({ orderId: data.id }); <- esto es un CAMBIO
+// save the ticket
+await ticket.save();
+Dado que estamos cambiando el ticket hay va a entrar el plugin,hay que controlar esto informando(publicando) el cambio de versión.
+
+			VIDEO 413 PRIVATE VS PROTECTED PROPERTIES
+
+

@@ -14,12 +14,13 @@ interface TicketDoc extends Document {
    price: number;
    userId: string;
    version: number;
+   orderId?: string;
 }
 
 // Interfaz para el Model/Coleccion.Extiende de Model<T extends Document> donde T será la interface de arriba que heredó de Document
 // Aqui solo digo que implemetaré el método build,pero ese método lo desarrollo más abajo y como estático además
 interface TicketModel extends Model<TicketDoc> {
-   build(attrs: TicketAttrs):TicketDoc;
+   build(attrs: TicketAttrs): TicketDoc;
 }
 
 const ticketSchema = new Schema<TicketDoc>({
@@ -27,18 +28,22 @@ const ticketSchema = new Schema<TicketDoc>({
       type: String,
       required: true,
    },
-   price: { 
+   price: {
       type: Number,
-      required:true
+      required: true
    },
    userId: {
       type: String,
-      required:true
+      required: true
+   },
+   orderId: {
+      type: String,
+      required: false
    }
-},{
+}, {
    // versionKey:false,
-   toJSON:{
-      transform(doc,ret){
+   toJSON: {
+      transform(doc, ret) {
          ret.id = doc._id;
          delete ret._id;
       }
@@ -56,6 +61,6 @@ ticketSchema.statics.build = (attrs: TicketAttrs) => {
 }
 
 
-const Ticket = model<TicketDoc,TicketModel>('Ticket',ticketSchema);
+const Ticket = model<TicketDoc, TicketModel>('Ticket', ticketSchema);
 
 export { Ticket };
