@@ -2,6 +2,7 @@ import request from 'supertest';
 import { app } from '../../app';
 import mongoose from 'mongoose';
 import { natsWrapper } from '../../nats-wrapper';
+import { Ticket } from '../../models/Ticket';
 
 jest.mock('../../nats-wrapper')
 
@@ -136,4 +137,32 @@ describe('pruebas en update ticket', () => {
       // dos porque he creado y actualizado luego se ha llamado dos veces
       expect(natsWrapper.client.publish).toHaveBeenCalledTimes(2);
    });
+
+   test('rejects updates if the ticket is reserved', async () => {
+      const cookie = global.signin();
+      const response = await request(app)
+         .post('/api/tickets')
+         .set('Cookie', cookie)
+         .send({
+            title: 'titulo',
+            price: 10
+         })
+
+      // lo busco de nuevo y le pongo la propiedad orderId simulando que está reservado y lo guardo
+      const ticket = await Ticket.findById(response.body.id);
+      
+      ticket!.set({ orderId: mongoose.Types.ObjectId().toHexString() });
+      await ticket!.save();
+      
+      // ahora trato de actualizarlo mientras está reservado
+      await request(app)
+         .put(`/api/tickets/${response.body.id}`)
+         .set('Cookie', cookie)
+         .send({
+            title: 'titulo updated',
+            price: 2000
+         })
+         .expect(400)
+   })
+
 })

@@ -500,4 +500,183 @@ Dado que estamos cambiando el ticket hay va a entrar el plugin,hay que controlar
 
 			VIDEO 413 PRIVATE VS PROTECTED PROPERTIES
 
+Recuerda que para publicar un evento era así:
+  ticket.set({ orderId: data.id });
+  new TicketUpdatedPublisher(natsWrapper.client).publish({
+
+Sin embargo,esto fijate que me obliga a importar la instancia singleton natsWrapper de ese proyecto en cualquier clase que herede de Listener o de Publisher.Esto puede dar problemas en el testing y además es muy fácil de evitar esta importación.
+Si voy a la definición de estas clases abstractas veré que tienen la propiedad private client:Stan;
+Nuestras subclases heredan de Listener<T> asi que en teoria tienen ya un client:Stan pero como es privado no tienen acceso.
+Asi pues la solución será marcar esta propiedad como protected y asi evitamos una dependencia entre archivos.
+
+Aparte nuestro publisher no sabe nada de la última propiedad nueva OrderId así que hay que ir a nuestro common module y hacer estos dos cambios.
+
+					VIDEO 414 PUBLISHING WHILE LISTENING
+
+Voy al common y cambio la propiedad tanto en el base-listener como en el base-publisher.Sin embargo,sólo vamos a añadir la prop orderId en el ticket-updated,no hace falta en el ticket-created pues nunca la va a tener al crear un ticket.
+
+export interface TicketUpdatedEvent {
+  subject: Subjects.TicketUpdated;
+  data: {
+    id: string;
+    version: number;
+    title: string;
+    price: number;
+    userId: string;
+    orderId?: string; 
+  };
+}
+
+La marcamos como opcional también.Publicamos la nueva version y actualizamos los dos servicios.
+Ahora ya podré acceder a la propiedad con this,pues es una simple prop que heredo.Y fijate como estamos creando un listener que también publica:
+
+export class OrderCreatedListener extends Listener<OrderCreatedEvent> {
+   readonly subject = Subjects.OrderCreated;
+   queueGroupName = queueGroupName;
+
+   async onMessage(data: OrderCreatedEvent['data'], msg: Message){
+      const ticket = await Ticket.findById(data.ticket.id);
+      if(!ticket){
+         throw new Error('Ticket not found');
+      }
+      await ticket.set({ orderId: data.id });
+      await new TicketUpdatedPublisher(this.client).publish({
+         id: ticket.id,
+         price: ticket.price,
+         title: ticket.title,
+         userId: ticket.userId,
+         orderId: ticket.orderId,
+         version: ticket.version
+         });      
+      await ticket.save();
+      msg.ack();
+   }
+}
+Perfectamente se puede publicar en la recepción de una publicacion(un listener).De echo es algo común.
+
+					VIDEO 415 MOCK FUNCTION ARGUMENTS
+
+Dado que estamos emitiendo un evento en la recepción de otro sería buena idea testear todo esto cual asintos. 
+Es importante entender esto,en el test estoy trabajando con el natsWrapper del mcock:
+
+export const natsWrapper = {
+   client: {
+      publish: jest.fn().mockImplementation( (subject: string,data:string , callback: () => void) =>{
+         callback();
+      })
+   }
+};
+
+En el setup lo puedo ver muy claro esto:
+tup = async () => {
+   // create an instance of the listener
+   const listener = new OrderCreatedListener(natsWrapper.client) <- es el mock
+
+Con todo esto en mente habrá que testear sobre ese natsWrapper realmente:
+it('publishes a ticket updated event', async () => {
+   const { listener, data, msg } = await setup();
+   await listener.onMessage(data, msg);
+   expect(natsWrapper.client.publish).toHaveBeenCalled();
+
+Para poder acceder a los argumentos de una función que se hizo jest.mock() tengo que usar la propiedad mock.calls, la cual devuelve un array,ojo.
+TS no va a saber interpretarlo pues no sabe que es un mock de un archivo.
+ // @ts-ignore
+   console.log(natsWrapper.client.publish.mock.calls) 
+    [
+      [
+        'ticket:updated',
+        '{"id":"6198e34147f6e311c7602688","price":99,"title":"concert","userId":"asdf","orderId":"6198e34147f6e311c760268a","version":0}',
+        [Function (anonymous)]
+      ]
+    ]
+Asi que ahora ya puedo comprobar los valores de los argumentos,accediendo al array como desee.Fijate que me viene todo en JSON asi que tendré que parsearlo a JS
+
+(natsWrapper.client.publish as Jest.Mock).mock.calls[0][1] <- el casteo me va a ayudar para poder quitar ese ts-ignore
+
+* asi pues creo estas dos sentencias,ya tengo todo claro.
+   const ticketUpdatedData = JSON.parse((natsWrapper.client.publish as jest.Mock).mock.calls[0][1]);
+
+   // recuerda que en data tengo LA ORDENasi que el id de la orden deberia ser el mismo que la nueva propiedad,confirmando que se ha emitido el evento,pues ha realizado su lógica
+   expect(data.id).toEqual(ticketUpdatedData.orderId);
+});
+
+					VIDEO 416 ORDER CANCELLED LISTENER
+
+Nuestro Order srv en algun punto emitirá el order:cancelled,para nosotros esto significa buscar ese ticket y remover la propiedad OrderId.
+
+NOTA: TS trabaja realmente mal con propiedades opcionales y el valor null.Es mejor poner undefined para quitar esta propiedad OrderId:
+
+ticket.set({orderId: undefined}) <- para quitar una propiedad usar undefined
+
+Simplemente creo el file order-cancelled-listener con el mismo código que el created pero quitando la prop orderId en vez de poniendola.
+
+				VIDEO 417 LIGHTNING-QUICK TEST
+
+it('updates the ticket,publishes an event and acks the message', async () => {
+   const { listener, ticket, orderId, data, msg } = await setup();
+
+   await listener.onMessage(data, msg);
+
+   const updatedTicket = await Ticket.findById(ticket.id);
+   expect(updatedTicket!.orderId).toBe(undefined);
+   expect(updatedTicket!.orderId).not.toBeDefined();
+
+   expect(msg.ack).toHaveBeenCalled();
+
+   expect(natsWrapper.client.publish).toHaveBeenCalled();
+
+});
+
+En vez de hacer tres test hacemos todo en uno,esperaremos que tras llamar al evento el ticket no tenga la propiedad orderId.
+
+					VIDEO 418 DONT'T FORGET TO LISTEN!    
+
+Fijate que aún no hemos puesto al Tickets srv a escuchar por estos eventos,asi que lo hacemos:
+
+new OrderCreatedListener(natsWrapper.client).listen();
+new OrderCancelledListener(natsWrapper.client).listen();
+
+			VIDEO 419 REJECTING EDITS OF RESERVED TICKETS
+
+Aún no hemos creado la lógica de que hacer cuando un ticket esté reservado(es decir,tenga ese campo orderId).Hagamoslo y hagamos un test rápido también. 
+
+Simplemente es añadir esto en el controlador del ticket.update.ts
+
+ if(ticket.orderId) {
+     throw new BadRequestError('Cannot edit a reserved ticket'); 
+   }
+
+El test será sencillo, creo un ticket logeandome con la cookie, y lo busco y le añado la propiedad,ahora trato de actualizarlo y deberá arrojar un 400 BadRequest:
+
+ test('rejects updates if the ticket is reserved', async () => {
+      const cookie = global.signin();
+      const response = await request(app)
+         .post('/api/tickets')
+         .set('Cookie', cookie)
+         .send({
+            title: 'titulo',
+            price: 10
+         })
+
+      // lo busco de nuevo y le pongo la propiedad orderId simulando que está reservado y lo guardo
+      const ticket = await Ticket.findById(response.body.id);
+      
+      ticket!.set({ orderId: mongoose.Types.ObjectId().toHexString() });
+      await ticket!.save();
+      
+      // ahora trato de actualizarlo mientras está reservado
+      await request(app)
+         .put(`/api/tickets/${response.body.id}`)
+         .set('Cookie', cookie)
+         .send({
+            title: 'titulo updated',
+            price: 2000
+         })
+         .expect(400)
+   })
+REcuerda hacer la prueba contraria,comentando el seteo de la propiedad para que no la tenga y deberia recibir un 200,pues no estaría reservado en ese caso.
+Seguiremos por el Expiration Service
+
+
+
 

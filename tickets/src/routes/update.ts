@@ -8,7 +8,8 @@ import {
   validateRequest,
   NotFoundError,
   requireAuth,
-  NotAuthorizedError
+  NotAuthorizedError,
+  BadRequestError
 } from '@oscargmk8s/common';
 // import events
 import { TicketUpdatedPublisher } from '../events/publishers/ticket-updated-publisher';
@@ -33,7 +34,14 @@ router.put('/api/tickets/:id', requireAuth,[
       throw new NotAuthorizedError()
    }
 
-   ticket.set({...req.body })
+   if(ticket.orderId) {
+     throw new BadRequestError('Cannot edit a reserved ticket'); 
+   }
+
+   ticket.set({
+      title: req.body.title,
+      price: req.body.price
+    })
 
    await ticket.save();
    

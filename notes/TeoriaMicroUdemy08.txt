@@ -1,0 +1,12 @@
+										   SECCION 20 WORKER SERVICES
+
+				VIDEO 420 THE EXPIRATION SERVICE
+
+Vamos a seguir atados al backend por un tiempo más.Seguiremos por el Expiration Service,el cual tendrá una única tarea que es vigilar por el tiempo de expiración.
+Cuando se cumpla que ha expirado emitirá un único evento también, de tipo expiration:complete.Su objetivo es informar al resto de servicios.
+Su objetivo no es cancelar una orden,ojo,eso es para el Orders srv,él sólo informa del tiempo de expiración.
+Realmente va a ser un srv muy sencillo pues no va a usar express ni rutas,simplemente escuchará por el order:created y emitirá el expiration:complete.
+
+					VIDEO 421 EXPIRATION OPTIONS
+
+La única complejidad de este servicio es como controlar este tiempo,y como emitir justo un evento 15 minutos despues.Hay varias opciones que vamos a contemplar en este video
