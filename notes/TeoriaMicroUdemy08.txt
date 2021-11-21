@@ -10,3 +10,77 @@ Realmente va a ser un srv muy sencillo pues no va a usar express ni rutas,simple
 					VIDEO 421 EXPIRATION OPTIONS
 
 La única complejidad de este servicio es como controlar este tiempo,y como emitir justo un evento 15 minutos despues.Hay varias opciones que vamos a contemplar en este video
+
+NOTA: recuerda que el campo a tratar es orderId: order.expiresAt.toISOString(y este campo en el Schema es un simple Date  expiresAt:{ type: mongoose.Schema.Types.Date }).
+
+OPCION UNO: usar un setTimeout( () => {},'15m') => no es una opción válida porque el contador se acumula en la memoria.Si de alguna manera se reiniciará el servicio comenzaría esa cuenta de nuevo(perdería todos los temporizadores,ya que se reinician).
+
+OPCION DOS: poner un LIstener en el Orders srv y si a la hora de realizar una operación el tiempo que arroja ese Listener(que será cuando expira) es mayor que el campo expiresAt caducó y está expirado.
+Si aún es mayor es que no ha caducado aún y se puede editar.El downside es que lo gestionará NATS y chocará con el mecanismo de cúantas veces permitiremos que un evento rebote,ya que su  lógica no es la misma que un evento común(la primera vez que rebote es suficiente)
+
+OPCION TRES: la opción tres sería que el broker(el event-bus) tuviera ya esa funcionalidad implementada y pudiera esperar 15 minutos para emitir un evento.(esta idea es conocida como 'scheduled message' o 'scheduled event').NATS no la soporta.
+
+Lo que vamos a hacer es usar una librería de propósito general llamada Bull JS que sirve para crear tareas sincronizadas(y disparar alguna lógica cuando se cumpla ese timer).Usaremos una instancia de Redis para almacenar esta tarea.
+Redis es una base de datos en memoria,es muy común usarla para tareas.Lo que haremos será guardar con Bull JS una lista de jobs.Recuerda que la propia libreria Bull me avisará que ha terminado la countdown.
+
+							VIDEO 422 INITIAL SETUP
+
+Elimino todas las dependencias de express,cookies,... e instalo las nuevas:
+>npm i bull @types/bull
+NOTA: recuerda que en k8s no se usan .env.Las variables de entorno se declaran en los yaml( if (!process.env.NATS_CLIENT_ID) <- estará en algún yaml)
+Simplemente es seguir el video
+
+					VIDEO 424 KUBERNETES SETUP
+
+Sigamos por la docker Image y por su Deploy además del Service para Redis en k8s.
+Fijate que el deploy de redis va a ser un poco diferente,ya que no necesito contactar con la DB,no usaré un Service,la comunicación será con el NATS.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expiration-depl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: expiration
+  template:
+    metadata:
+      labels:
+        app: expiration
+    spec:
+      containers:
+        - name: expiration
+          image: oscargm40/expiration-ticketing-k8s:latest
+          imagePullPolicy: Always  
+          env:
+            - name: NATS_URL
+              value: 'http://nats-srv:4222'
+            - name: NATS_CLUSTER_ID
+              value: ticketing
+            - name: NATS_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name 
+            - name: REDIS_HOST
+              value: 'expiration-redis-srv'
+
+Para el Deploy+Service de Redis me vale el de Mongo pero con la imagen 'redis' y con las variables que necesite.Pan comido,asin.
+
+					VIDEO 425 FILE SYNC SETUP
+
+Aún me falta actualizar el skaffold.yaml con el nuevo microservicio:
+    - image: oscargm40/expiration-ticketing-k8s
+      context: expiration
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual: 
+          - src: 'src/**/*.js'
+            dest: .
+REinicio todo y compruebo que los servicios se conectan a sus DBs y a NATS.Todo perfecto,asinto
+
+						VIDEO 426 LISTENER CREATION
+
+Vamos a empezar creando el listener para el order:created. 
+
