@@ -1,7 +1,5 @@
 
 
-
-
 import { Message } from 'node-nats-streaming';
 import { Listener, Subjects, TicketCreatedEvent } from '@oscargmk8s/common';
 import { Ticket } from '../../models/Ticket';
@@ -14,7 +12,7 @@ export class TicketCreatedListener extends Listener<TicketCreatedEvent> {
 
    async onMessage(data: TicketCreatedEvent['data'], msg: Message) {
       const { id, title, price } = data;
-
+      // console.log(data,'data para crear en el Order')
       const ticket = Ticket.build({
          id,
          title,
@@ -22,7 +20,7 @@ export class TicketCreatedListener extends Listener<TicketCreatedEvent> {
       });
 
       await ticket.save();
-
+      // console.log(await Ticket.findById(data.id),'console');
       msg.ack();
    }
 

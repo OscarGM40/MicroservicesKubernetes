@@ -84,3 +84,87 @@ REinicio todo y compruebo que los servicios se conectan a sus DBs y a NATS.Todo 
 
 Vamos a empezar creando el listener para el order:created. 
 
+import { Listener, OrderCreatedEvent, Subjects } from '@oscargmk8s/common';
+import { Message } from 'node-nats-streaming';
+import { queueGroupName } from './queue-group-name';
+
+export class OrderCreatedListener extends Listener<OrderCreatedEvent> {
+  readonly subject = Subjects.OrderCreated;
+  queueGroupName = queueGroupName;
+
+  async onMessage(data: OrderCreatedEvent['data'], msg: Message) {
+
+  }
+					
+				VIDEO 427 WHAT'S BULL ALL ABOUT?
+
+Normalmente se suele tener una request(por ejemplo,convertir un mp4 a mkv).En vez de simplemente ejecutar esa tarea inmediatamente,se suele tener un Worker Server,algo que se ocupa de esta tarea(y puedo tener varias copias de este servicio).
+Cuando se hace esta petició se crea un job,que no es más que un plain object de JS,incluyendo las demandas que necesita para ese job.Este job se va a guardar en la Redis DB y las diferentes replicas del Worker Service van a estar haciendo pull a la DB en cuanto haya un job nuevo
+Cuando lo completen informarán de nuevo.Bull JS se ocupa tanto de informar desde el Worker hacia Redis como cuando se crea el job y se guarda en Redis(ver imagen)
+NOTA: puede parecer que Bull tiene cierta similitud con NATS ,pero no es asi,no es capaz de procesar una vasta cantidad de mensajes de forma asíncrona,está hecho para gestionar pequeñas tareas
+Trabajaremos agregando un job a una queue(una serie o grupo de acciones).Asi que con Bull crearemos Queues y le agregamos un job 
+
+						VIDEO 428 CREATING A QUEUE
+
+Realmente es bastante sencillo crear estas Queues,simplemente hay que importar la clase desde la libreria al proyecto.Despues recibirá el nombre del 'canal' como primer argumento(aunque técnicamente no es un canal,es sólo el nombre del grupo) y como segundo argumento un objeto con las opciones de conexión:
+
+import Queue  from "bull";
+
+interface Payload {
+   orderId: string;
+}
+
+const expirationQueue = new Queue<Payload>("order:expiration",{
+   redis: {
+      host: process.env.REDIS_HOST,
+   }
+})
+
+// job is wrapping the payload,the data,which is orderId:'sfsf' 
+expirationQueue.process(async (job) => {
+   console.log("I want to publish an expiration:complete event for orderId", job.data.orderId);
+});
+
+export { expirationQueue };
+
+Fijate que fácil he creado un tipado para una instancia de una clase pasandole una interfaz como genérico.Cuando tenga cualquier clase puedo pasarle una interfaz para tiparla(class<T>).Increible:
+interfaz Casa {
+  habitaciones:number;
+  metros:number;
+  }
+class Edificio<Casa> <- cuando haga new Edificio TS me va a ayudar con el tipado.
+
+				VIDEO 429 QUEUEING A JOB ON EVENT ARRIVAL
+
+Recordemos que habiamos dejado el async onMessage(data,msg) sin lógica.Es aqui donde tenemos que ir ahora,pues es en la recepción del order:created cuando hay que hacer algo con Bull + Redis.Es muy sencillo:
+
+ async onMessage(data: OrderCreatedEvent['data'], msg: Message) {
+    await expirationQueue.add({
+      orderId: data.id,
+    });
+
+    msg.ack();
+  }
+El método expirationQueue.add(data,options) lleva la data a agregar a la cola como primer argumento.El segundo no lo necesitamos.
+
+Aun falta crear la instancia del listener en el index.ts:
+ new OrderCreatedListener(natsWrapper.client).listen();
+
+				VIDEO 430 TESTING JOB PROCESSING
+
+Creo un ticket en Postman y despues una Order.Fijate que parece que no es event.version -1 en mi caso.Investigar más.
+
+				VIDEO 431 DELAYING JOB PROCESSING
+
+ Para poner un delay a la hora de agregar el job simplemente uso la propiedad delay como segundo argumento:
+      // el tiempo desde el expiresAt hasta el actual
+    const delay = new Date(data.expiresAt).getTime() - new Date().getTime();
+    await expirationQueue.add({
+      orderId: data.id,
+    }, {
+      delay: delay
+    });
+
+			VIDEO 432 DEFINING THE EXPIRATION COMPLETE EVENT
+
+
