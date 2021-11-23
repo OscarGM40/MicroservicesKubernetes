@@ -36,12 +36,15 @@ const ticketSchema = new Schema<TicketDoc>({
       type: String,
       required: true
    },
+   version: {
+      type: Number,
+      default: 1
+   },
    orderId: {
       type: String,
       required: false
    }
 }, {
-   // versionKey:false,
    toJSON: {
       transform(doc, ret) {
          ret.id = doc._id;
@@ -50,7 +53,7 @@ const ticketSchema = new Schema<TicketDoc>({
    }
 });
 
-ticketSchema.set('versionKey', 'version');
+ticketSchema.set('versionKey','version');
 // @ts-ignore
 ticketSchema.plugin(updateIfCurrentPlugin);
 

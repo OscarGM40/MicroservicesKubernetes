@@ -35,7 +35,6 @@ const OrderSchema = new mongoose.Schema({
    expiresAt:{ type: mongoose.Schema.Types.Date },
    ticket:{type: mongoose.Schema.Types.ObjectId,ref:'Ticket'}
 },{
-   // versionKey:false,
    toJSON:{
       transform(doc,ret){
          ret.id = ret._id;

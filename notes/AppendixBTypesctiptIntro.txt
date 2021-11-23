@@ -1,3 +1,102 @@
 					BASICS OF TYPESCRIPT
 
-El mayor objetivo de Typescript es ver los errores en el editor,antes de que se compile el TS a JS.
+						VIDEO 568 OVERVIEW
+
+El mayor objetivo de Typescript es ver los errores en el editor,antes de que se compile el TS a JS..Simplemente intenta tipar el Javascript.
+
+1- TS intenta cogerr los errores durante desarrollo(sólo vale durante desarrollo)
+2- Usa 'type annotations' para analizar mi código
+3- De nuevo,sólo está activo durante desarrollo(esta sintaxis extra nunca llegará al navegador)
+4- El compilado realmente no agrega ningun beneficio(a diferencia de Java u otros lenguajes compilados)
+
+Hay webs como https://www.typescriptlang.org/play/ donde ver a qué Javascript me va a compilar el Typescript.Lo mejor es pensar en TS como un amigo
+
+				VIDEO 569 ENVIRONMENT SETUP
+
+Puedo instalar typescript de forma global(ts-node es una herramienta cli para terminal que combina los comandos ts y node)
+NOTA: el compilador(tsc) viene  en el modulo typescript
+>npm i -g typescript ts-node
+
+* Puedo comprobar la instalación viendo la versión:
+>tsc --help
+>npm -g ls 
+>ts-node --version
+NOTA:fijate que puedo instalar VSCode al path desde settings y tipeando 'install path'.Ya lo hace él.Se recomienda instalar Prettier.
+También es buena idea ir a Preferences y activar Format On Save.
+
+						VIDEO 570 FIRST APP
+
+Recuerda que el principal objetivo es que TS me ayude a ver los errores ANTES de ejecutar la aplicación en vez de después.
+
+Para compilar un archivo en TS hay que usar tsc fileName.Esto creará su réplica en un .js:
+>tsc index.ts <- generará el .js.
+
+Ahora ya podría ejecutar el .js con node:
+>node index.js
+
+Claro que tener que hacer esto todo el rato es una mala idea.Para juntar las funcionalidades de compilar con tsc y ejecutar con node está el módulo ts-node(el cual instalamos anteriormente).
+Lógicamente recibe el archivo TYPESCRIPT:
+>ts-node index.ts
+En un sólo paso puedo compilar el ts y ejecutar el js.
+
+					CATCHING ERRORS WIHT TS
+
+Podriamos tratar de imprimir proiedades que no existen:
+
+ console.log(`
+   The Todo with ID: ${ID} 
+   Has a title of: ${title}
+   Is it finished? ${finished}
+   `)
+
+   The Todo with ID: undefined 
+   Has a title of: undefined
+   Is it finished? undefined
+
+Esto sucede al trabajar con Javascript.Pero TS me va a ayudar con estos errores,para que no los tenga.
+Sabiendo que realmente las propiedades son completed(y no finished),id(en minúsculas) y title(también en minúsculas) debería tipar la respuesta
+
+interface Todo {
+   id: number;
+   title: string;
+   completed: boolean;
+}
+
+axios.get<Todo>(url).then(response => {
+   const todo = response.data;
+   const ID = todo.id;
+   const title = todo.title;
+   const finished = todo.completed;
+
+NOTA: las interfaces en TS se usan para definir la estructura de un objeto.Asi pues,habrá un objeto por ahí en mi app de tipo Todo con las props id,title y completed.
+
+Fijate que podia haber casteado la response.data como un Todo(pues es una instancia):
+
+axios.get(url).then(response => {
+   const todo = response.data as Todo;
+
+Quizás tipar la respuesta sería mejor opción en este caso,pero debo memorizar que puedo inferir cualquier propiedad con un tipado casteandola(instance as interfaceName).Interesante.
+Ya puedo ejecutar el archivo y no debería ver los undefined anteriores.
+Fijate que estoy cogiendo el error antes de la ejecución y no después.Esto es una clara muestra de que he cogido y evitado un error antes de la ejecución(y es el mero propósito de la razón de ser de TS).
+
+Bien,y que sucederá si sacamos todo esto a una función y le paso los argumentos en cualquier orden?:
+
+   logTodo(ID,finished,title);
+})
+
+const logTodo = (id,title,completed) => {
+   console.log(`
+   The Todo with ID: ${id} 
+   Has a title of: ${title}
+   Is it finished? ${completed}
+   `)
+}
+Esto actualmente ya da un error.De todas formas,de nuevo comprobamos que no vemos el error hasta que ejecutamos el programa.Es aqui donde entran las 'type annotations'.En cuanto ponga un tipo a los argumentos ya no podré pasar un orden cualquiera:
+
+   logTodo(ID,finished,title);
+})
+
+const logTodo = (id:number,title:string,finished:boolean)
+Esto me dará un error ya antes de ejecutar el script,pues no puedo pasar un boleano cuando espera un string.
+
+En el siguiente video seguiremos con otra app

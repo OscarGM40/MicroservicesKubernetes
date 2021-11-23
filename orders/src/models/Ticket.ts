@@ -20,11 +20,10 @@ interface TicketModel extends mongoose.Model<TicketDoc> {
    findByEvent(event: { id: string; version: number }): Promise<TicketDoc | null>;
 }
 
-const TicketSchema = new mongoose.Schema<TicketDoc>({
+const TicketSchema = new mongoose.Schema({
    title: { type: String, required: true },
    price: { type: Number, required: true, min: 0 },
 }, {
-   // versionKey:false,
    toJSON: {
       transform(doc, ret) {
          ret.id = doc._id;
@@ -33,8 +32,7 @@ const TicketSchema = new mongoose.Schema<TicketDoc>({
    }
 })
 
-TicketSchema.set('versionKey', 'version');
-// @ts-ignore
+TicketSchema.set('versionKey','version');
 TicketSchema.plugin(updateIfCurrentPlugin);
 
 // fijate que si creo un método,sea para statics o para methods lo tengo que definir 
@@ -63,7 +61,7 @@ TicketSchema.statics.findByEvent = (event: {
 TicketSchema.methods.isReserved = async function () {
 
    const existingOrder = await Order.findOne({
-      ticket: this,
+      ticket: this as any,
       status: {
          $in: [
             OrderStatus.Created,

@@ -5,9 +5,7 @@ import { Message } from "node-nats-streaming";
 import mongoose from 'mongoose';
 import { Ticket } from "../../../models/Ticket";
 
-
 jest.mock('../../../nats-wrapper')
-
 
 const setup = async () => {
    // create an instance of the listener
@@ -22,7 +20,7 @@ const setup = async () => {
 
    // create a fake data object
    const data: TicketUpdatedEvent['data'] = {
-      version: ticket.version + 1,
+      version: ticket.version ,
       id: ticket.id,
       title: 'concert two',
       price: 20,
@@ -46,7 +44,7 @@ it('finds,updates and saves a ticket', async () => {
    const updatedTicket = await Ticket.findById(ticket.id);
    expect(updatedTicket!.title).toEqual(data.title);
    expect(updatedTicket!.price).toEqual(data.price);
-   expect(updatedTicket!.version).toEqual(data.version);
+   expect(updatedTicket!.version).toEqual(data.version+1);
 })
 
 it('acks the message', async () => {

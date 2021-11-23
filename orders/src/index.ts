@@ -3,6 +3,7 @@ import { app } from "./app";
 import { TicketCreatedListener } from "./events/listeners/ticket-created-listener";
 import { TicketUpdatedListener } from "./events/listeners/ticket-updated-listener";
 import { natsWrapper } from "./nats-wrapper";
+import { ExpirationCompleteListener } from './events/listeners/expiration-complete-listener';
 
 //
 
@@ -14,11 +15,11 @@ const start = async () => {
   if (!process.env.MONGO_URI) {
     throw new Error('Mongo Uri must be provided in the depl.yaml for tickets microservice!');
   }
-  
+
   if (!process.env.NATS_URL) {
     throw new Error('Nats_url must be provided in the depl.yaml for tickets microservice!');
   }
-  
+
   if (!process.env.NATS_CLIENT_ID) {
     throw new Error('Nats_client-id must be provided in the depl.yaml for tickets microservice!');
   }
@@ -33,7 +34,7 @@ const start = async () => {
       process.env.NATS_CLUSTER_ID,
       process.env.NATS_CLIENT_ID,
       process.env.NATS_URL,
-     );
+    );
 
     natsWrapper.client.on('close', () => {
       console.log('NATS connection closed!')
@@ -45,7 +46,8 @@ const start = async () => {
 
     new TicketCreatedListener(natsWrapper.client).listen();
     new TicketUpdatedListener(natsWrapper.client).listen();
-    
+    new ExpirationCompleteListener(natsWrapper.client).listen();
+
     await mongoose.connect(process.env.MONGO_URI, { // fijate que auth-mongo-srv es el Service ClusterIP,lo añadiré un PVC,pero necesitaré ese Service también! También creo la base de datos 'auth' al conectar
       useNewUrlParser: true,
       useUnifiedTopology: true,

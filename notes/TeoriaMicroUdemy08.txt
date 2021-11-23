@@ -167,4 +167,181 @@ Creo un ticket en Postman y despues una Order.Fijate que parece que no es event.
 
 			VIDEO 432 DEFINING THE EXPIRATION COMPLETE EVENT
 
+Hay que crear una nueva interfaz y su tipo en el common module:
+
+import { Subjects } from './subjects';
+
+export interface ExpirationCompleteEvent {
+   subject: Subjects.ExpirationComplete;
+   data: {
+      orderId: string;
+   };
+}
+Exporto este archivo en el index,hago una nueva publish y actualizo el expiration folder.
+
+			VIDEO 433 PUBLISHING AN EVENT ON JOB PROCESSING
+
+Creo la clase ExpirationCompletePublisher que hereda de la abstracta del video anterior y en el new Queue<Payload>,en el método process de la instancia llamamos a esta clase,que publicará el evento:
+
+expirationQueue.process(async (job) => {
+   new ExpirationCompletePublisher(natsWrapper.client).publish({
+      orderId: job.data.orderId,
+   });
+Fijate que simplemente va a publicar un evento tras X tiempo toda esta lógica.
+
+Hacemos una prueba.Fijate que ahora nos queda recibirlo en el Orders srv o cualquier srv que lo necesite.
+
+				VIDEO 434 HANDLING AN EXPIRATION EVENT
+
+Ahora que ya emitimos el expiration:complete en nuestro Expiration Srv el Orders srv debería marcar esa Order como cancelled.Al cancelarla tendremos que emitir elorder:cancelled también,pero vayamos por lo primero,que es crear un listener en el Orders para el expiration:complete event.
+
+xport class ExpirationCompleteListener extends Listener<ExpirationCompleteEvent> {
+   readonly subject = Subjects.ExpirationComplete;
+   queueGroupName = queueGroupName;
+   
+   async onMessage(data: ExpirationCompleteEvent['data'], msg: Message) {
+      const order = await Order.findById(data.orderId);
+   
+      if (!order) {
+         throw new Error('Order not found');
+      }
+   
+      if (order.status === OrderStatus.Complete) {
+         return msg.ack();
+      }
+   
+      order.set({
+         status: OrderStatus.Cancelled,
+      });
+* Realmente aquí se nos presenta una duda.¿Ponemos el ticket a null dentro de la Order ,dado que se ha cancelado la orden?O lo mantenemos?
+
+				VIDEO 435 EMITTING THE ORDER CANCELLED EVENT 
+
+Poner a null el ticket es una mala idea.Perderemos la información.¿Y si queremos ver el ticket que estaba asociado a una Order aunque está fue cancelada?.
+
+Además ya tengo un método estático en el modelo que me devuelve true o false,es decir, si esta reservado.Si la orden del ticket actual esta en estado Created,Awaiting o Complete devuelve que está reservado(bloqueando su edición,ya que simplemente se ha creado,es decir no hay una orden sobre él,o ya se ha pagado o alguién está intentando pagarlo).
+
+TicketSchema.methods.isReserved = async function () {
+
+   const existingOrder = await Order.findOne({
+      ticket: this,
+      status: {
+         $in: [
+            OrderStatus.Created,
+            OrderStatus.AwaitingPayment,
+            OrderStatus.Complete,
+         ]
+      }
+   })
+   return !!existingOrder;
+}
+
+Fijate que en cuanto la order se ponga en Cancelled el ticket se considerará NoReservado,desbloqueandolo para su edición,pues vuelve a estar libre.
+Fijate que el order:cancelled le interesa al Payment srv,ya que no puede pagarse esa orden más,pues se canceló el pedido.
+
+Asi pues simplemente emitimos el order:cancelled que ya tenemos la clase:
+
+      order.set({
+         status: OrderStatus.Cancelled,
+      });
+
+      await order.save();
+
+      await new OrderCancelledPublisher(this.client).publish({
+         id: order.id,
+         version: order.version,
+         ticket: {
+            id: order.ticket.id,
+         },
+      });
+   
+      msg.ack();
+
+IMPORTANTE: fijate en el uso del await new OrderCancelledPublisher ... para asegurarnos que no se llama antes al msg.ack();
+
+		VIDEO 436 TESTING THE EXPIRATION COMPLETE LISTENER
+
+Realmente es un punto crítico de la aplicación este evento,asi que vamos a realizar un par de tests sobre el evento.Como siempre empezamos por la función setup:
+
+
+const setup = async () => {
+   const listener = new ExpirationCompleteListener(natsWrapper.client);
+
+   const ticket = Ticket.build({
+      id: mongoose.Types.ObjectId().toHexString(),
+      title: 'concert',
+      price: 20,
+   });
+
+   await ticket.save();
+
+   const order = Order.build({
+      status: OrderStatus.Created,
+      userId: 'asdf',
+      expiresAt: new Date(),
+      ticket,
+   });
+
+   await order.save();
+
+   const data: ExpirationCompleteEvent['data'] = {
+      orderId: order.id,
+   };
+
+   // @ts-ignore
+   const msg: Message = {
+      ack: jest.fn()
+   };
+
+   return { listener, order, ticket, data, msg };
+
+}
+
+				VIDEO 437 TESTING AFTER SETUP
+
+Recuerda que hay que llamar a una función extra.Creo los tests:
+
+test('updates the order status to cancelled', async () => {
+  const { listener, data, msg, ticket,order} = await setup();
+   //  me traigo el setup y llamo al onMessage
+  await listener.onMessage(data, msg);
+  // simplemente busco la orden y compruebo su status
+  const updatedOrder = await Order.findById(order.id);
+
+  expect(updatedOrder!.status).toEqual(OrderStatus.Cancelled);
+
+});
+
+it('emit an OrderCancelled event', async () => {
+  const { listener, data, msg, ticket,order} = await setup();
+
+   await listener.onMessage(data, msg);
+   // debo esperar que se haya llamado al publish,no?
+   expect(natsWrapper.client.publish).toHaveBeenCalled();
+   // y que se haya llamado con el id exacto de la Order
+   const eventData = JSON.parse((natsWrapper.client.publish as jest.Mock).mock.calls[0][1]);
+
+   expect(eventData.id).toEqual(order.id);
+
+});
+
+Más sencillo de lo que parece,asin.
+
+					VIDEO 438 LISTENING FOR EXPIRATION 
+
+Aun nos falta ponernos a la escucha en el index.ts:
+new TicketCreatedListener(natsWrapper.client).listen();
+    new TicketUpdatedListener(natsWrapper.client).listen();
+    new OrderCancelledListener(natsWrapper.client).listen();
+
+Puedo testearlo en Postman,creando un ticket,despues una orden y debería ver el evento order:cancelled publicado por el Orders srv(pero primero por el Expiration srv).
+
+						SECCION 21 THE PAYMENTS SRV
+
+Recordemos que el payments srv va a estar escuchando por el order:created y el order:cancelled y él mismo va a emitir el charge:created para el Charge srv
+
+					VIDEO 441 INITIAL SETUP
+
+
+
 
