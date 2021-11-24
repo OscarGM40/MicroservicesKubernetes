@@ -99,4 +99,72 @@ Esto actualmente ya da un error.De todas formas,de nuevo comprobamos que no vemo
 const logTodo = (id:number,title:string,finished:boolean)
 Esto me dará un error ya antes de ejecutar el script,pues no puedo pasar un boleano cuando espera un string.
 
-En el siguiente video seguiremos con otra app
+				VIDEO 575 OVERVIEW OF THE COURSE
+
+El objetivo de este minicurso es entender la sintax+features y despues centrarnos en la implementación(design patterns) mediante aplicaciones didacticas(última sección 7).Asi que primero habrá conceptos teóricos.
+El orden de la teoria será:
+
+1- Understanding basic types
+2- Function typing + annotations
+3- Type definition files
+4- Arrays in TS
+5- Modules systems
+6- Classes + Refresher on OOP
+7- Projects( design patterns)
+
+						VIDEO 576 TYPES 
+
+En TS casi cualquier cosa que pueda tener un valor tiene un tipo.Una función tendrá su tipo,un array también,un objeto,una clase,...
+IMPORTANTE: tipar una variable,objeto,array,.. no se hace sin ningun motivo.Si el lenguaje sabe de que tipo es cierto valor,sabrá que métodos puedo usar,qué propiedades,etc...Dar un tipado es muy importante.
+Ejemplo: si red es un string el lenguaje sabré que puedo usar charAt,concat(),includes,endsWith,startsWith,indexOf,,localeCompare,match(),... y muchos métodos más prebuilt por el lenguaje solo por decir que la variable es de tipo string.
+Como atajo a decir que la variable puede usar todos esos métodos lo que se hace es darle un simple y único nombre,en este caso 'string'.
+Puedo ver un tipo como una etiqueta para identificar a qué métodos y propiedades tengo acceso
+
+					VIDEO 577 MORE ON TYPES
+
+En TS está el tipo Number,que en otros lenguajes suele subdividirse en varios,en este caso engloba cualquier tipo de numero.
+En TS también está el tipo Date,por ejemplo.Veamos todos ellos:
+
+Primitive: number,boolean,void,undefined,string,symbol,null
+Object Types: function,array,class,object
+
+Los types de TS se dividen en estas dos categorías,básicamente.
+El tipado tiene dos grandes propósitos:
+1- Ayudar a TS a que identifique los errore y me ayude
+2- Ayudar a otros desarrolladores a que entiendan el código
+
+Cada valor que declare en Typescript debe tener un tipo.
+
+				VIDEO 579 FEATURE ONE - TYPING
+
+Se debe tipar todo.Ejemplo:
+const today = new Date(); <- TS me sugeriŕá métodos para una Date
+Es por esto que se debe tipar todo.
+
+		VIDEO 580 FEATURE TWO TYPE ANNOTATIONS + TYPE INFERENCE
+
+Una type annotation es una pequeña pieza de código para decirle a TS de que tipo es una variable(:type)
+
+Type inference: TS va a intentar averigüar por él mismo de qué tipo es una variable
+
+Si bien parecen lo mismo en la primera soy yo el que le dice a TS el tipo,en la segunda lo averigüa TS por sí sólo.
+
+// la sintaxis para una type annotation es :type
+let apples: number = 5; //:number es la type annotation
+// en cuanto anote a apples como number ya no podré pasarle como valor nada más que un number
+
+let speed:string = "fast"; //:string es la type annotation
+//de nuevo no podré reasignarla más que a otro string
+
+let hasName: boolean = true; //:boolean es la type annotation
+
+let nothingMuch: null = null; //:null es la type annotation
+//este es el primer type annotation que coincide con su valor
+
+let nothing:undefined = null; //:undefined es la type annotation
+//este es el segundo type annotation que coincide con su valor
+
+let now: Date = new Date(); //:Date es la type annotation
+
+VIDEO 581
+
