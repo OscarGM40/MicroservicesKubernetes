@@ -19,6 +19,7 @@ export class OrderCancelledListener extends Listener<OrderCancelledEvent> {
       // no usar null con TS,siempre undefined para eliminar un field
       ticket.set({ orderId: undefined });
       await ticket.save();
+      // console.log(ticket,'ticket tras saving in Order DB y que será publicado')
 
       await new TicketUpdatedPublisher(this.client).publish({
          id: ticket.id,

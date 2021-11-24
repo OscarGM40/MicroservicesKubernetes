@@ -38,7 +38,7 @@ const ticketSchema = new Schema<TicketDoc>({
    },
    version: {
       type: Number,
-      default: 1
+      default: 0
    },
    orderId: {
       type: String,

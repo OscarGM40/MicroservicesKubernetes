@@ -12,7 +12,7 @@ import { natsWrapper } from "../nats-wrapper";
 const router = express.Router();
 
 // const EXPIRATION_WINDOW_SECONDS = 15 * 60;
-const EXPIRATION_WINDOW_SECONDS = 1 * 5;
+const EXPIRATION_WINDOW_SECONDS = 1 * 30;
 
 router.post('/api/orders', requireAuth, [
    body('ticketId')
@@ -48,6 +48,7 @@ router.post('/api/orders', requireAuth, [
          expiresAt: expiration,
          ticket
       });
+
       await order.save();
       // tell to the rest of the app that an order was created(publish an event)
       new OrderCreatedPublisher(natsWrapper.client).publish({
@@ -58,7 +59,7 @@ router.post('/api/orders', requireAuth, [
          expiresAt: order.expiresAt.toISOString(),
          ticket: {
             id: ticket.id,
-            price: ticket.price  
+            price: ticket.price
          }
       });
 

@@ -53,7 +53,7 @@ TicketSchema.statics.findByEvent = (event: {
 }) => {
    return Ticket.findOne({
       _id: event.id,
-      version: event.version,
+      version: event.version - 1,
    });
 };
 
