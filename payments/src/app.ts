@@ -6,7 +6,7 @@ import cookieSession from "cookie-session";
 import { errorHandler,NotFoundError,currentUser } from "@oscargmk8s/common/build";
 
 // import para rutas
-
+import { createChargeRouter } from "./routes/new";
 //  Initalizations
 const app = express();
 
@@ -27,8 +27,8 @@ app.use(
 )
 
 // MIddlewares co-dependientes de los de arriba 
-app.use(currentUser)
-
+app.use(currentUser);
+app.use(createChargeRouter);
 // Middlewares para Endpoints
 
 // No confundir mi error con el default de nginx

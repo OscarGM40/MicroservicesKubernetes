@@ -38,6 +38,13 @@ spec:
                 name: orders-srv
                 port: 
                   number: 3000
+          - path: /api/payments/?(.*)
+            pathType: "Prefix" # investigar los tipos
+            backend:
+              service:
+                name: payments-srv
+                port: 
+                  number: 3000
           - path: /?(.*) # cogerá el resto de rutas,tiene que ir debajo de todas por menor especificidad
             pathType: "Prefix"
             backend:

@@ -166,5 +166,87 @@ let nothing:undefined = null; //:undefined es la type annotation
 
 let now: Date = new Date(); //:Date es la type annotation
 
-VIDEO 581
+				VIDEO 581 OBJECT LITERAL ANNOTATIONS
+
+Realmente ya śe todo esto,excepto el último(fijate que lo usé en event:{prop:type;prop:type}
+
+/* Built in objects */
+let now: Date = new Date(); //:Date es la type annotation
+let colors: string[] = ["red", "green", "blue"]; 
+let myNumbers: number[] = [1, 2, 3]; 
+let truths:boolean[] = [true, false, true]; 
+
+// Classes(siempre Capitalizadas)
+class Car {}
+let car: Car = new Car();
+// Object literal
+let point:{x:number; y:number} = { x: 10, y: 20 };
+No confundir el type(que usa punto y coma) en la declaración con la inicialización del object(asignación de valores).
+
+Las mismas reglas se aplican para estos tipos.NO podré asignar un valor que no coincida con estas type annotations de la izquierda:
+
+let point:{x:number;y:number} <- point va a ser un object que tenga las props x e y,y me dará error si no las tiene,y serán number ambas.
+
+				VIDEO 583 FUNCTION TYPE ANNOTATIONS
+
+La type annotation para una función es un tanto compleja:
+/* Function fijate en :(args) => return*/
+const logNumber: (i:number) => void = (i: number) => {
+   console.log(i);
+   };
+Fijate que lo que está a la izquierda del '=' siempre es el type annotation,da igual que sea una funcion,una clase,un object,...Lo de la izquierda es el tipo.
+
+					VIDEO 584 TYPE INFERENCE
+
+Si voy al archivo y borro todas las type annotations veré que no tengo error:
+const apple=5; <- veré que es de tipo number.
+const texto='hola'; <- veré que es de tipo string
+
+NOTA: esto es el sistema de inferencia de tipos de TS.Pero,¿cuando puedo dejar a TS que infiera el tipo sin riesgo alguno?
+Si hago la declaración e inicialización(asignación de valor/es) en la misma linea TS va a saber inferir el tipo correctamente(con lo que acabo de escribir medio file gratis -_-, mira que es prehistoric este TS).
+
+NOTA: si TS no es capaz de inferirle el tipo porque separo la declaración e inicialización o es un tipo que no sabe inferir(como Color[]) siempre le va a poner de tipo 'any'.
+Bien,entonces,¿si TS es capaz de inferir correctamente los types,cuando debo ser yo el que lo haga?Esto es una gran pregunta y hay una respuesta para ella:
+1- cuando separe declaración e inicialización debo usar las types annotations yo o TS no sabrá qué es.
+2- Cuando quiera usar un type que no puede ser inferido
+3- Cuando una función devuelva 'any' y yo quiera ser más especifico.
+Estos son los tres escenarios en los que tengo que tipar yo.El resto lo puede hacer TS.
+
+					VIDEO 585 THE ANY TYPE
+
+El tipo 'any' básicamente significa que Typescript no tiene ni idea que tipo de valor está siendo retornado(o asignado),asi que puede ser cualquiera.
+La funcion JSON.parse() devuelve any,ya que puedo estar parseando cualquier cosa.Fijate que esto es el punto 3 que acabamos de comentar
+
+IMPORTANTE: any es otro tipo más.Si algo es de tipo any TS no va a tener ni idea de que funciones,propiedades puede usar(adiós a los beneficios de un lenguaje tipado).HAY QUE EVITAR EL USO DE ANY A TODA COSTA.
+La verdadera finalidad de tipar es encontrar errores antes de ejecutar el script,si usamos any TS no va a poder ayudar.
+
+				VIDEO 586 FIXING THE ANY TYPE
+
+En el ejemplo que teniamos,dado que JSON.parse devuelve any,aunque estemos en la misma linea tendré que ayudar a TS:
+
+/* WHEN TO USE ANNOTATIONS BY ME */
+// 1) Function that returns the 'any' type
+const json = '{"x": 10, "y": 20}';
+const coordinates:{ x:number; y:number } = JSON.parse(json);
+console.log(coordinates); // {x: 10, y: 20}
+
+				VIDEO 587 DELAYED INITIALIZATION
+
+Siempre que use la inicialización en otra linea TS me va a tipar con 'any'.(fijate que veré tres puntitos sobre el warning).Este es un caso tonto pero muy explicito de que tengo que tipar foundWord con foundWord:boolean.
+
+// 2) When we declare a variable on one line and initialize it later
+let words = ["red", "green", "blue"];//aqui si infiere
+let foundWord; //<- aqui no infiere
+
+for (let i = 0; i < words.length; i++) {
+    if (words[i] === "green") {
+       foundWord = true; //es aqui donde la inicio
+    }
+}
+La solución es darle el tipo en la declaración:
+let foundWord:boolean;
+* Fijate que asi se quita el warning y como TS me avisa.
+
+				VIDEO 588 WHEN INFERENCE DOESN'T WORK
+
 

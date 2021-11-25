@@ -445,7 +445,191 @@ port class OrderCreatedListener extends Listener<OrderCreatedEvent> {
 
 				VIDEO 446 QUICK TESTING
 
+Hacemos un simple test comprobando que se emite la data correctamente:
 
+it('replicates the order info', async () => {
+   const { listener, data, msg } = await setup();
 
+   await listener.onMessage(data, msg);
+   // busco la order por el id
+   const order = await Order.findById(data.id);
+   // y comparo la propiedad emitida contra la original
+   expect(order!.price).toEqual(data.ticket.price);
+})
 
+it('acks the message', async () => {
+   const { listener, data, msg } = await setup();
 
+   await listener.onMessage(data, msg);
+
+   expect(msg.ack).toHaveBeenCalled();
+})
+
+Si data.ticket.price es el order.price está claro que emite el evento.
+
+			VIDEO 447 MARKING AN ORDER AS CANCELLED
+
+Creo el listener que cancele una orden al escuchar este evento:
+
+export class OrderCancelledListener extends Listener<OrderCancelledEvent> {
+   readonly subject = Subjects.OrderCancelled;
+   queueGroupName = queueGroupName;
+
+   async onMessage(data: OrderCancelledEvent['data'], msg: Message) {
+      // realmente no haria falta la version,porque no va a haber problemas de concurrencia
+      const order = await Order.findOne({
+         _id: data.id,
+         version: data.version - 1
+      });
+
+      if (!order) {
+         throw new Error('Order not found');
+      }
+
+      order.set({ status: OrderStatus.Cancelled });
+      await order.save();
+
+      msg.ack();
+   }
+}
+Si tubiera problemas con la version buscar por la última tras ordenar.
+
+			VIDEO 448 CANCELLED TESTING
+
+Esta vez creamos una Orden ya en el setup:
+
+ const order = Order.build({
+      id: mongoose.Types.ObjectId().toHexString(),
+      status: OrderStatus.Created,
+      price: 10,
+      userId: 'asdf',
+      version: 0
+   })
+   
+   await order.save();
+   
+   const data: OrderCancelledEvent['data'] = {
+      id: order.id,
+      version: 1, //debe de ser una más que la version actual
+      ticket: {
+         id: mongoose.Types.ObjectId().toHexString()
+      }
+   }
+
+   // @ts-ignore
+   const msg: Message = {
+      ack: jest.fn()
+   }
+
+   return { listener, data, msg, order };
+
+}
+
+it('updates the status of the order', async () => {
+   const { listener, data, order, msg } = await setup();
+
+   await listener.onMessage(data, msg);
+   // busco la order por el id
+   const updatedOrder = await Order.findById(order.id);
+   // y compruebo su estatus,debe estar cancelada
+   expect(updatedOrder!.status).toEqual(OrderStatus.Cancelled);
+})
+
+				VIDEO 449 STARTING THE LISTENERS
+
+De nuevo implemento ambas clases en el index.ts y hago un pequeño test con Postman creando un ticket y despues una Order,confirmando que el Payments srv recibe el evento order:created
+
+				VIDEO 450 PAYMENTS FLOW WITH STRIPE
+
+Vamos a usar la libreria StripeJs que me permitirá abstraerme de trabajar con toda la seguridad que se necesita implementar al gestionar un pago con una tarjeta de crédito.
+StripeJs me permitirá usar una ventana modal para mostrarle al cliente.
+El flujo mas o menos es así:
+
+1- El usuario rellena el modal y da en submit/enviar/pagar...
+2- La data llega a la Stripe API,que devuelve un token hacia el cliente(debería ver este token como una especie de pre-autorización hacia mi).Me va a permitir pre-cargar en esa tarjeta cierta cantidad de dinero(aún no se ha completado el pago)
+* Es un token de un sólo uso.
+
+3- En el cliente,en el lenguaje que sea(en este caso js) vamos a coger este token y mandarlo al payments service(a un backend).
+
+4- Nosotros miraremos que se esté intentando pagar una Order válida(no esté Canelled) y tras decidir que está todo correcto cargaremos esa cantidad al cliente,enviando de nuevo ese token a la Stripe API
+Esto último creará un Charge(un pago)
+
+NOTA: puede verse que hay una gran parte gestionada por el cliente(el cual aún no tenemos).Sin embargo podemos hacer la parte del backend ya y hacer pruebas con Postman simulando las peticiones de un cliente
+
+			VIDEO 451 IMPLEMENTING THE CREATE CHARGE HANDLER
+
+Vamos a implementar el paso 4 (creación de ese endpoint,recepción del token y envio a la Stripe API de ese mismo token).
+
+Nuestro Payments Srv va a seguir una serie de reglas de validación tras recibir esa request:
+NOTA: recibiremos {token:token,orderId:id}
+1- Buscará una order con esa order Id
+2- Se asegurará que esa order pertenece al user que la creó originalmente(mediante jwt.decode ??)
+3- Se asegurará que el price a pagar es el mismo que el cargo a la tarjeta
+4- Verificará el payment con Stripe API,reenviando ese token(es aqui donde se carga al usuario y se cobra el dinero creando un charge o cargo)
+5- Creará un 'charge' record en la DB para grabar cada cargo que realicemos.
+
+NOTA: recuerda que cualquier microservicio que use un Routing com express,Angular,React... debe ser configurado en el IngressNGINX del cluster.
+
+   - path: /api/payments/?(.*)
+            pathType: "Prefix" # investigar los tipos
+            backend:
+              # serviceName: auth-srv # OJO CON LAS VERSIONES!!
+              # servicePort: 3000
+              service:
+                name: payments-srv
+                port: 
+                  number: 3000
+
+Fijate que /api/payments/?(.*) <- la '?' indica opcional asi que puedo hacer peticiones a /api/payments o a /api/payments/cualquiercosa
+Recuerda llevar cada router al app.ts para usar esa ruta.
+
+IMPORTANTE: fijate como SG también usa la misma sintaxis que FH:
+router.post('/api/payments',
+   requireAuth,
+   [
+      body('token')
+         .not()
+         .isEmpty()
+         .withMessage('Token is required'),
+      body('orderId')
+         .not()
+         .isEmpty()
+         .withMessage('OrderId is required'),
+      body('orderId')
+         .isMongoId()
+         .withMessage('orderId field muste be a valid Id'),
+   ],
+   validateRequest,
+   async (req: Request, res: Response) => {
+      res.send({ success: true });
+   })
+
+export { router as createChargeRouter };
+Debo usar lo mismo yo(ruta,validateTokenMW,[validators],validateFieldsMW,controller).Definitivamente parece el mejor approach.
+Parece que puedo usar 'as' en los export e import(sólo hay??).
+NOTA: recuerda que 2GB para k8s pueden ser pocos para este proyecto
+
+			VIDEO 452 VALIDATING ORDER PAYMENT
+
+Vamos a empezar con los primeros pasos de las validaciones de Payments Srv(que exista esa OrderId,que el user que la creo sea el mismo que el que quiere pagar y que el estado de la Order aún sea válido).
+      const { token, orderId } = req.body;
+
+      const order = await Order.findById(orderId);
+
+      if (!order) {
+         throw new NotFoundError();
+      }
+      // recuerda que requireAuth me deja hacer req.currentUser! porque si pasó requireAuth hay un req.currentUser fijo.
+      if (order.userId !== req.currentUser!.id) {
+         throw new NotAuthorizedError();
+      }
+
+      if(order.status === OrderStatus.Cancelled) {
+         throw new BadRequestError('Order already cancelled.Cannot pay for an cancelled Payment Order');
+      }
+
+      res.send({sucess: true});
+Vamos a testear estas tres situaciones,ya que son casos muy importantes.Usaremos un id no válido,despues crearemos dos users y trataremos de pagar la order de otro y despues crearemos una order y esperaremos simplemente que se cancele y trataremos de pagar.
+Ninguna de estas acciones debería ser realizable.
+
+VIDEO 453 
