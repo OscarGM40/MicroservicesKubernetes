@@ -632,4 +632,164 @@ Vamos a empezar con los primeros pasos de las validaciones de Payments Srv(que e
 Vamos a testear estas tres situaciones,ya que son casos muy importantes.Usaremos un id no válido,despues crearemos dos users y trataremos de pagar la order de otro y despues crearemos una order y esperaremos simplemente que se cancele y trataremos de pagar.
 Ninguna de estas acciones debería ser realizable.
 
-VIDEO 453 
+			VIDEO 453 TESTING ORDER VALIDATION BEFORE PAYMENT
+
+Vamos a testear la ruta,ya que es importante:
+  
+it('should returns a 404 when purchasing an order that does not exists', async () => {
+
+    await request(app)
+      .post('/api/payments')
+      // @ts-ignore
+      .set('Cookie', global.signin())
+      .send({
+        token: 'askldjfsljdf',
+        orderId: mongoose.Types.ObjectId().toHexString(),
+      })
+      .expect(404);
+  })
+
+Para el segundo test creo una order y trato de guardarla con otro user.No deberia dejarme(401)
+  it('returns a 401 when purchasing an order that doesn\'t belong to the user', async () => {
+
+    const order = Order.build({
+      id: mongoose.Types.ObjectId().toHexString(),
+      userId: mongoose.Types.ObjectId().toHexString(),
+      version: 0,
+      price: 20,
+      status: OrderStatus .Created,
+    });
+
+    await order.save();
+
+    await request(app)
+      .post('/api/payments')
+      // @ts-ignore
+      .set('Cookie', global.signin())
+      .send({
+        token: 'askldjfsljdf',
+        orderId: order.id,
+      })
+      .expect(401);
+  })
+
+				VIDEO 454 TESTING SAME-USER VALIDATION
+
+El último test será asegurarse que recibo un 400 al tratar de pagar una CancelledOrder.Vamos a tener un par de problemas para poder simular esto:
+
+ if (order.userId !== req.currentUser!.id) {
+         throw new NotAuthorizedError();
+      }  
+
+Porqué?Porque nuestro global.signin(),tal como lo tenemos,crea un id aleatorio:
+
+global.signin = () => {
+   // Build a JWT payload { id, email}
+   const payload = {
+      id: new mongoose.Types.ObjectId().toHexString(),
+      email: 'test@test.com',
+   }
+Asi que vamos a hacer que pueda recibir un ARGUMENTO OPCIONAL,que será el id:
+  global.signin(id?:string) => {
+    const payload = {
+    id: id || new mongoose....
+
+NOTA:recuerda que debo marcar el argumento como opcional con ? y que puedo evaluar con || si es null o undefined,asinto.
+
+  it('returns a 400 when purchasing an cancelled order', async () => {
+    const userId = new mongoose.Types.ObjectId().toHexString();
+
+    const order = Order.build({
+      id: mongoose.Types.ObjectId().toHexString(),
+      userId,
+      version: 0,
+      price: 20,
+      status: OrderStatus.Cancelled,
+    });
+    
+    await order.save();
+
+    await request(app)
+      .post('/api/payments')
+      // @ts-ignore
+      .set('Cookie', global.signin(userId))
+      .send({
+        token: 'askldjfsljdf',
+        orderId: order.id,
+      })
+      .expect(400);
+
+Como siempre testeo lo contrario también.
+
+						VIDEO 455 STRIPE SETUP
+
+En orden de poder comunicarnos con la Stripe API vamos a tener que instalar el SDK de Stripe para Node(una simple libreria npm que me permitirá comunicarme con su backend).
+Cuando intente comunicarme con su API para cobrar a un usuario tengo que proporcionar un token y una API key que identifique mi aplicación.
+Asi que hay que hacer dos pasos,instalar el SDK y registrarme en su web para que me den una API key
+
+PASO UNO
+>npm i stripe <- el SDK es muy ligero,esto lo instala
+PASO DOS
+voy a https://stripe.com y me registro(aunque la web pueda cambiar su API apenas cambia y es muy estable)
+Alli al registrarme ya me dan una clave pública y privada,y si ya lo estoy en developers,api keys puedo ver la key privada.
+
+			VIDEO 456 CREATING A STRIPE SECRET
+
+Recuerda que tengo la app en un cluster de Kubernetes,asi que puedo crear un secret en el cluster:
+Sintaxis: k create secret generic nombreDelSecret --from-literal STRIPE_KEY=sk_test_sdfsdf
+>kubectl create secret generic stripe-secret --from-literal ...
+
+Si ahora muestro los secrets de mi cluster veré que lo he creado de tipo opaque:
+ get secret
+NAME                  TYPE                                  DATA   AGE
+default-token-6njkg   kubernetes.io/service-account-token   3      168d
+jwt-secret            Opaque                                1      104d
+postgres-secret       Opaque                                1      159d
+stripe-secret         Opaque                                1      5s
+
+Como lo voy a usar en el pod aún tengo que ir al Deploy y decirselo a k8s.
+       - name: STRIPE_KEY # secret del cluster para stripe
+              valueFrom:
+                secretKeyRef:
+                  name: stripe-secret
+                  key: STRIPE_KEY
+
+El name va a ser como lo llamaremos en el cluster,más concretamente en este servicio,pues sólo lo declaré aquí.Hace referencia al secret con el nombre 'stripe-secret' y la key STRIPE_KEY.El value será inferido.
+Y todo esto lo ha encriptado?
+
+					VIDEO 457 CREATING A CHARGE WITH STRIPE
+
+ Para poder usar stripe hay que crear una instancia de la clase Stripe.Vamos a crear un único file para crear una instancia única:
+
+En stripe.ts:
+import Stripe from 'stripe';
+
+export const stripe = new Stripe(
+  process.env.STRIPE_KEY!, {
+    apiVersion: '2020-08-27', // usar la que me sugiera stripe
+});
+Fijate que fácil es crear un singleton en ts o js.
+
+Para poder cobrar hay que crear un charge y para crear este charge lo puedo ver en la doc oficial pero es con el método create de la propiedad charges,y fijate que es una Promise.Habrá métodos para crear un charge,para borrarlo,actualizarlo...
+
+await stripe.charges.create({
+  amount:2000,
+  currency:'usd'
+  source:
+  description:
+
+Algunas propiedades son requeridas(amount,currency y source lo son).Stripe siempre usa la 'smallest currency unit',es decir céntimos de euro o de dollar,etc.(luego ese 2000 son 20 dolares americanos).
+El source es a donde cargar el dinero.Puede ser el id de una credit car,un bank account,un token,.. Lógicamente tampoco es un field opcional.
+La description es opcional.
+
+Con esto en mente creamos este charge en el controller.
+   await stripe.charges.create({
+         currency: 'usd',
+         amount: order.price * 100,
+         source: token,
+         description: 'Charge for orderId: ${orderId}',
+      });
+
+				VIDEO 458 MANUAL TESTING OF A CHARGE
+
+

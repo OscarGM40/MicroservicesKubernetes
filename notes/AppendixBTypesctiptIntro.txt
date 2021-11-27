@@ -249,4 +249,153 @@ let foundWord:boolean;
 
 				VIDEO 588 WHEN INFERENCE DOESN'T WORK
 
+Puede haber casos en los que la inferencia no funcione bien:
+let numbers = [-10, -1, 12];
+let numberAboveZero = false;
+
+for (let i = 0; i < numbers.length; i++) {
+    if (numbers[i] > 0) {
+       numberAboveZero = numbers[i];
+    }
+}  
+En este caso dará error al asignarle numbers[i] dado que TS infirió que es de tipo boolean.Para arreglar esto tendré que usar:
+let numberAboveZero:number | boolean = false;
+
+Puede haber situaciones en los que una variable necesite usar más de un tipo por cuestiones de lógica de negocio(aunque se recomienda evitar este tipo de escenarios)
+
+			VIDEO 589 MORE ON ANNOTATIONS AROUND FUNCTIONS
+
+Ya hemos terminado de ver como trabaja la inferencia con variables.Es hora de ver lo mismo para funciones.
+Fijate que la anotación que hemos visto en realidad es para la variable,no para la función:
+ const logNumber: (i:number) => void = (i:number) => {console.log(i)};<- esta anotación es para tipar la variable logNumber,no para la función(la función está despues del '=').
+
+IMPORTANTE: en una función TS puede usar la inferencia de tipos para adivinar el valor de retorno de esa función.Como programadores nosotros tenemos que tipar los argumentos de la función y podemos tipar el retorno.
+En la funciones el type inference sólo funciona para el retorno,TS nunca va a tratar de adivinar el tipado de los argumentos.Veamos todo esto en un ejemplo:
+
+const add = (a,b) => {} <- TS nunca va a adivinar el tipo de 'a' y 'b'!
+
+* Asi pues tengo que tipar los argumentos
+const add = (a:number, b:number):number => {
+    return a + b;
+}
+* Fijate que he tipado el valor de retorno también.
+
+				VIDEO 590 INFERENCE AROUND FUNCIONS
+
+En el momento en que yo como programador especifico un valor de retorno para una función TS va a analizar el cuerpo de esa función para ver si cumple.
+
+Si quisiera retornar otro tipo de valor como un string TS dará un error:
+
+const add = (a:number, b:number):number => {
+    return "fsdffdff";
+}
+
+En cuanto a la inferencia de tipos en las funciones es muy importante entender que TS nunca va a mirar por si la lógica está bien,simplemente verá qué es lo que devuelve el body de la función y lo pondrá como tipo.
+Esto es un error,ya que puedo haberme confundido en la lógica.Ejemplo:
+
+const substract = (a:number, b:number) => {
+  a - b;
+} 
+En este caso simplemente veré que es de tipo ():void pero yo no quería eso,se me olvidó el return.Lógicamente quiero que devuelva un Number.
+
+Es por esto QUE NO USARÉ LA INFERENCIA DE TIPOS EN FUNCIONES PARA EL VALOR DE RETORNO,porque TS no comprueba la lógica del cuerpo de la función.
+
+					VIDEO 591 MORE ON TYPES AROUND FUNCIONS
+
+En cuanto a funciones normales o anónimas la sintaxis es prácticamente idéntica:
+/* Cuando sea una función normal la sintaxis es igual */
+function divide(a:number, b:number):number {
+  return a / b;
+}
+/* Lo mismo para funciones anónimas */
+const multiply = function(a:number, b:number):number {
+  return a * b;
+}
+
+					VIDEO 592 TYPES VOID AND NEVER
+
+También hay una type annotation para especificar que una función no tiene ningun valor de retorno,no retorna un valor:
+
+const logger = (message:string):void => {
+  console.log(message);
+}
+
+IMPORTANTE: una función que retorna void también puede retornar null o undefined!
+const logger = (message:string) => {
+  console.log(message);
+  return null; <- o también return undefined;
+}
+
+Hay otro tipo también para especificar que nunca vamos a llegar al final de la función(a su return)por ejemplo porque tiramos un Error antes:
+const throwError = (message:string): never => {
+  throw new Error(message);
+
+Técnicamente lanzar un Error es como no lanzar nada y además al lanzarlo nunca se va a llegar al return de esa función.Este es un ejemplo muy raro que apenas se usa.
+Sólo debo usar este tipo cuando realmente sea lo que quiero hacer(normalmente los errores se usan dentro de otras funciones que retornan lo que necesiten):
+
+const checkSomething = (something:string):string => {
+  if(!something){ throw new Error('bla bla bla') };
+  return something
+
+Fijate que esto es tremendamente común
+
+				VIDEO 593 DESTRUCTURING WITH ANNOTATIONS
+
+Imagina que tengo un object literal con propiedades que son una función,algo muy común
+
+const todaysWeather = { 
+  date: new Date(),
+  weather: 'sunny'
+}
+
+Ahora podría tener algo como esto:
+const logWeather = (forecast:{ date:Date,weather:string }):void => {
+  console.log(forecast.date);
+  console.log(forecast.weather);
+}
+logWeather(todaysWeather);
+
+Pero que pasa si quisiera usar destructuring?Realmente sólo tengo que cambiar forecast(el objeto) por la desestructuración
+
+const logWeather2015 = ({date,weather}:{date:Date,weather:string}) => { } 
+
+Bien fácil
+
+NOTA: The semi-colon is used when we're annotating an object literal, not function parameters.
+EDIT: Actually now it's not clear to me, because lecture 602. Long Type Annotations, he reverts back to using semi-colons when annotating the function parameters. From what I can see, semi-colon is the preferred style (and I think was the only way for a while) but now you can use either semi-colon or comma.
+Parece que para usar una type annotation en un object literal hay que usar semicolon,pero no si está como argumento de una función,que permite tanto semicolon como comma.
+
+					VIDEO ANNOTATIONS AROUND OBJECTS
+
+Ya hemos visto type annotations con variables y funciones.Sólo nos quedan los objects:
+/* Teniendo un object literal como este */
+const profile = {
+  name: 'John',
+  age: 30,
+  coords: {
+    lat: 0,
+    lng: 15
+  },
+  setAge(age:number):void{
+    this.age = age;
+  }
+}
+* Imagina que quiero desestructurar y tipar la edad.No voy a usar { age }:number aunque sepa que es un number porque realmente es de tipo profile.age,no number */
+
+Lo que se hace es decir de que tipo de prop es y despues el tipo de esa prop
+const { age }:{age:number} = profile;
+
+Fijate que esto viola la regla anterior de :number,pero porque es la desestructuración de un object .Imagina que quisiera sacar el name también:
+
+const { age, name }:number = profile;<- está claro que name no es de tipo number,asi que es const {age}:{age:number}=objectLiteral 
+
+Esta sería la forma de sacar dos o más  propiedades,por cada una que saco la saco con su correspondiente par de  propName+:+propType
+const { name,age:edad }:{name:string,age:number} = profile;
+
+const { coords:{ lat, lng } }: {coords:{ lat:number;lng:number}} = profile;
+
+Como puedo ver es bastante sencillo,sólo hay que trabajar más con ello.Además siempre tendré este tutorial para volver aqui si es necesario.
+
+				VIDEO 595 ARRAYS IN TYPESCRIPT
+
 

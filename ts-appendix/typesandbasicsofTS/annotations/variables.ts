@@ -38,7 +38,7 @@ const pointA ={x:1,y:2}; //<- TS will infer again correctly
 let oranges;
 oranges=10;// TS ya no es capaz de inferir el tipo y le pondrá de tipo any
 
-/* WHEN TO USE ANNOTATIONS BY ME */
+/* WHEN TO USE ANNOTATIONS BY THE DEVELOPER */
 // 1) Function that returns the 'any' type
 const json = '{"x": 10, "y": 20}';
 const coordinates:{ x:number; y:number } = JSON.parse(json);
@@ -53,3 +53,13 @@ for (let i = 0; i < words.length; i++) {
        foundWord = true; //es aqui donde la inicio
     }
 }
+
+// Whenever we have a variable whose type cannot be inferred
+let numbers = [-10, -1, 12];
+let numberAboveZero: boolean | number = false;
+
+for (let i = 0; i < numbers.length; i++) {
+    if (numbers[i] > 0) {
+       numberAboveZero = numbers[i];
+    }
+}  

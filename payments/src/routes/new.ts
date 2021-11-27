@@ -1,4 +1,3 @@
-
 import express, { Request, Response } from 'express';
 import { body } from 'express-validator';
 import {
@@ -11,6 +10,8 @@ import {
 } from '@oscargmk8s/common';
 
 import { Order } from '../models/Order'
+import { stripe } from '../stripe';
+
 
 const router = express.Router();
 
@@ -46,6 +47,14 @@ router.post('/api/payments',
       if(order.status === OrderStatus.Cancelled) {
          throw new BadRequestError('Order already cancelled.Cannot pay for an cancelled Payment Order');
       }
+
+      await stripe.charges.create({
+         currency: 'usd',
+         amount: order.price * 100,
+         source: token,
+         description: 'Charge for orderId: ${orderId}',
+      });
+
 
       res.send({sucess: true});
    })
