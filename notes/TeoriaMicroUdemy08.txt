@@ -792,4 +792,107 @@ Con esto en mente creamos este charge en el controller.
 
 				VIDEO 458 MANUAL TESTING OF A CHARGE
 
+Para testear un pago habrá que crear un ticket,despues una Order con ese ticket y despues una petición a /api/payments(el único endpoint de momento).
+Si bien tenemos que recuperar un token del body mientras estemos en modo prueba en stripe tenemos un token disponible(tok_visa).Siempre va a funcionar:
 
+* Hay que mandar a /api/payments una orderId:
+{
+    "orderId":"",
+    "token":"tok_visa"
+}
+En cuanto mande una orderId válida durante el tiempo estipulado debería ser capaz de crear un pago en stripe.
+
+					VIDEO 459 AUTOMATED PAYMENT TESTING
+
+IMPORTANTE: recuerda que los secrets como la private key de stripe que tengo en el cluster sólo están accesibles dentro de ese cluster,pero el ambiente de pruebas se ejecuta en mi máquina local,fuera de minikube y el cluster.
+Es por esto que no tengo acceso a esta variable de entorno.ASi que tengo dos opciones:
+1ª: crear otra variable de entorno en mi SO
+2ª: hacer un mock de stripe(tal como hicimos en el folder __mocks__ con natsWrapper.ts).Puedo hacer un mock del file stripe.ts alli.
+
+NOTA:voy a simular un objeto llamado 'stripe' con un método  create que resolverá a un objeto:
+export const stripe = {
+  charges: {
+    create: jest.fn().mockResolvedValue({  }),
+  }
+}
+
+				VIDEO 460 MOCKED STRIPE CLIENT
+
+Recuerda que para usar este objeto como mock tengo que traerlo de donde está originalmente,no se trata de traer el de aquí:
+* Me traigo el original
+import { stripe } from '../../stripe';
+* Y lo simulo,si hay un mock jest usará ese mock
+jest.mock('../../stripe');
+NOTA:fijate que siempre me refiero a la ruta del original,pero se usará el fake.Jest mirará en ese folder __mocks__ y si lo encuentra usará ese al 100% seguridad
+
+
+
+  it('returns a 201 with valid inputs',async () => {
+    const userId = new mongoose.Types.ObjectId().toHexString();
+
+    const order = Order.build({
+      id: mongoose.Types.ObjectId().toHexString(),
+      userId,
+      version: 0,
+      price: 20,
+      status: OrderStatus.Created,
+    });
+    
+    await order.save();
+
+    await request(app)
+      .post('/api/payments')
+      // @ts-ignore
+      .set('Cookie', global.signin(userId))
+      .send({
+        token: 'tok_visa',
+        orderId: order.id,
+      })
+      .expect(201);
+
+    const chargeOptions = (stripe.charges.create as jest.Mock).mock.calls[0][0];
+    expect(chargeOptions.source).toEqual('tok_visa');
+    expect(chargeOptions.amount).toEqual(20 * 100);
+    expect(chargeOptions.currency).toEqual('usd');
+
+
+  })
+Fijate que no tuve que hacer el JSON.parse y que realmente no estoy probando nada contra la stripe API.
+
+				VIDEO 461 A MORE REALISTIC TEST SETUP
+
+La opción dos es usar la API y crear un cargo de forma normal.Son opciones excluyentes,o uso una o uso otra.
+Asi que renombro el file anterior a stripe.ts.old en el folder __mocks__ para que no sea cargado por jest y remuevo el jest.mock hacia el archivo original del test.
+En el setup.ts creo la environmet con la api key private.Sin embargo,testearlo va a ser un tanto complejo,pues necesitamos acceder a la respuesta que nos proporcione su APi en el ambiente de test,y ¿como hacemos esto?.
+Podríamos cambiar el controlador para acceder a estos datos,pero nunca se debe cambiar el código existente para pasar una prueba.
+
+Stephen lo arregla yendo a la documentación oficial y alli vemos que también hay formas para obtener(retrieve) un charge,para listar los últimos 10,...
+
+NOTA:fijate que hay create | retrieve | update | capture | list all charge
+Desafortunadamente retrieve necesita un chargeId y no lo tenemos,pero si podemos listar los últimos 10 cargos.
+Desafortunadamente también parece que viene desordenada,asi que mandaremos algo único(mandaremos un precio generado random).Despues desde el ambiente de test haremos la petición a esa ruta de la stripe API y comprobaremos si en los últimos diez hay un cargo con esa cantidad
+
+					VIDEO 462 REALISTIC TEST IMPLEMENTATION
+
+Con todo lo anterior en mente creamos un price random:
+
+ const price = Math.floor(Math.random() * 100000);
+
+    const order = Order.build({
+      id: mongoose.Types.ObjectId().toHexString(),
+      userId,
+      version: 0,
+      price,
+      status: OrderStatus.Created,
+    });
+
+Y despues buscamos en los últimos 50(mejor usar más para reducir las posibilidades de que no esté este cargo)
+
+   const stripeCharges = await stripe.charges.list({ limit: 50 });
+      const stripeCharge = stripeCharges.data.find(charge => {
+        return charge.amount === price * 100;
+      });
+
+      expect(stripeCharge).toBeDefined();
+
+NOTA:stripes.charges.list devuelve un objeto con la data en su propiedad del mismo nombre 'data'.

@@ -56,7 +56,7 @@ router.post('/api/payments',
       });
 
 
-      res.send({sucess: true});
+      res.status(201).send({sucess: true});
    })
 
 export { router as createChargeRouter };

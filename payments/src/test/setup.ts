@@ -10,11 +10,13 @@ declare global {
       }
    }
 }
+// va aqui porque se va a requirir realmente rápido esta env
+process.env.STRIPE_KEY ='sk_test_51JfryfBi2097CnFhxxFcHZ4xLJHfwJnU7NZIxrKUTRXGX27xXTlbTDWtvjZkR8JjNtti54NMnJjsCTJmAZZBVqSJ00uH0nX3k1'
 
 let mongo: any;
 //Antes de ejecutar cualquier test hay que levantar la DB
 beforeAll(async () => { 
-   // es el mejor sitio realmente ya que todos quieren ese fake client:Stan.Pero no funciona por algún motivo que no explicó Stephen
+   // es el mejor sitio realmente ya que todos quieren ese fake client:Stan.Pero no funciona por algún motivo que no explicó Stephen(diria que es la ruta)
    // jest.mock('../nats-wrapper')
    process.env.JWT_KEY='cualquiercosa';
    process.env.NODE_TLS_REJECT_UNAUTHORIZED='0';
