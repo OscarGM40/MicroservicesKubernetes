@@ -498,4 +498,90 @@ Entender las interfaces + clases me va a permitir diseñar excelentes aplicacion
 NOTA: las interfaces se usan para crear un nuevo tipo(a new type) describiendo los nombres de las propiedades y los tipos de las mismas para una instancia de este nuevo tipo(pues parece una clase,asinto)
 IMPORTANTE: cuando creo una interfaz estoy creando un nuevo tipo usable por toda mi aplicación,igual que un string o un number,solo que es un custom type.
 
+				VIDEO 603 LONG TYPE ANNOTATIONS
 
+Imaginando que tengo un objeto que representa un coche viejo:
+
+const oldCivic = {
+    name: 'civic',
+    year: 2000,
+    broken: true
+};
+
+const printVehicle = (vehicle: {name:string;year:number;broken: boolean}):void => {
+  console.log(`Name: ${vehicle.name}`);
+  console.log(`Year: ${vehicle.year}`);
+  console.log(`Broken: ${vehicle.broken}`);
+}
+
+printVehicle(oldCivic); 
+Pueod observar que la type annotation queda excesivamente larga,además que si añadiera otra propiedad a ese objeto quedaría obsoleta(0 reusabilidad)
+
+				VIDEO 604 FIXING ANNOTATIONS WITH INTERFACES
+
+Para no tener que usar types annotations tan largas y poco reusables se usan interfaces.Recuerda que van capitalizadas:
+
+interface Vehicle {
+    name: string;
+    year: number;
+    broken: boolean;
+}
+
+const printVehicle2 = (vehicle: Vehicle):void => {
+  console.log(`Name: ${vehicle.name}`);
+  console.log(`Year: ${vehicle.year}`);
+  console.log(`Broken: ${vehicle.broken}`);
+}
+
+Incluso voy a poder declarar propiedades como opcionales.Fijate que se usan masivamente para tipar los object literals de JS.
+
+				VIDEO 605 SYNTAX AROUND INTERFACES
+
+/* En cuanto a la sintaxis admite todo(Date,functions,Promises) */
+interface VehicleTwo {
+  name: string;
+  year:Date;
+  broken: boolean;
+  //sintaxis:function():returnType
+  summary():string;
+}
+
+const newCivic = {
+    name: 'civic',
+    year: new Date(),
+    broken: true,
+    summary():string{
+        return `Name of the car: ${this.name}`;
+    }
+}
+
+const printNewVehicle = (vehicle: VehicleTwo):void => {
+  console.log(`Name: ${vehicle.name}`);
+  console.log(`Year: ${vehicle.year}`);
+  console.log(`Broken: ${vehicle.broken}`);
+  console.log(`Summary: ${vehicle.summary()}`);
+} 
+NOTA: recalcar que admite tipos más complejos como Date y funciones.
+
+					VIDEO 606 FUNCTIONS IN INTERFACES
+
+¿Que pasa si sólo quisiera tener la función summary que hace un reporte?Sería más apropiado usar esta interfaz:
+
+interface Reportable {
+    summary():string;
+}
+
+¿Y si tuviera este otro objeto literal?
+const drinkTwo = {
+    color: 'brown',
+    carbonated: true,
+    sugar: 40,
+    summary():string{
+        return `My drink has ${this.sugar} grams of sugar`;
+    }
+}
+
+IMPORTANTE: es aqui donde viene toda la razón de ser de las interfaces en TS(recuerda que son clases).Fijate que ambos objetos car y drink tienen la funcion summary().
+Es aqui donde esta interfaz Reportable se comporta como una clase abstracta,cada objeto que sea de ese tipo desarrollará la funcion summary de la forma que desee(métodos abstractos).
+
+NOTA:es por todo esto que los objetos deben estar tipados con una interfaz.Esa interfaz definirá las reglas a cumplir

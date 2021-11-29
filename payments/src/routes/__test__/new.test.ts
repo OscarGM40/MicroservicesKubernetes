@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import { Order } from '../../models/Order';
 import { OrderStatus } from '@oscargmk8s/common';
 import { stripe } from '../../stripe';
+import { Payment } from '../../models/Payment';
 
 // jest.mock('../../stripe');
 
@@ -104,6 +105,13 @@ describe('Testing payments Microservice', () => {
 
       expect(stripeCharge).toBeDefined();
       expect(stripeCharge!.currency).toEqual('usd');
+
+      const payment = await Payment.findOne({
+        orderId: order.id,
+        stripeId: stripeCharge!.id,
+      });
+
+      expect(payment).not.toBeNull();
       
       // si hago el test contra la API estos expect contra el mock no me valen
     /* const chargeOptions = (stripe.charges.create as jest.Mock).mock.calls[0][0];

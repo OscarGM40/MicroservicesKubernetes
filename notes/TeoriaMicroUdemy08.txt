@@ -896,3 +896,163 @@ Y despues buscamos en los últimos 50(mejor usar más para reducir las posibilid
       expect(stripeCharge).toBeDefined();
 
 NOTA:stripes.charges.list devuelve un objeto con la data en su propiedad del mismo nombre 'data'.
+
+			VIDEO 463 TYING AN ORDER AND CHARGE TOGETHER
+
+Aún no estamos dando persistencia a los Charges.Asi que hay que crear su colección.Un charge es un Order+Payment.
+Si bien no lo vamos a usar aquí,será de gran utilidad para algun dashboard con métricas,etc que pudiera tener una app más seria.Asi que es bastante importante darle seguimiento a los pagos.La colección se llamará payments.
+
+NOTA: si bien no vamos a usar un campo 'version' Stephen recomienda usarlo casi siempre,ya que en apps serias en microservicios es casi indispensable.
+Fijate que incluirlo a posteriori sería un gran inconveniente y no molesta tenerlo desde un principio.
+
+
+
+import mongoose from 'mongoose';
+
+interface PaymentAttrs {
+  orderId: string;
+  stripeId: string;
+}
+
+interface PaymentDoc extends mongoose.Document {
+  orderId: string;
+  stripeId: string;
+}
+
+interface PaymentModel extends mongoose.Model<PaymentDoc> {
+  build(attrs: PaymentAttrs): PaymentDoc;
+}
+
+const PaymentSchema = new mongoose.Schema({ 
+  orderId: {  type: String, required: true },
+  stripeId: { type: String, required: true },
+}, {
+  toJSON: {
+    transform(doc, ret) {
+      ret.id = ret._id;
+      delete ret._id;
+    }
+  }
+});
+
+PaymentSchema.statics.build = (attrs: PaymentAttrs) => {
+  return new Payment(attrs); //<-Payment es el model
+}
+
+const Payment = mongoose.model<PaymentDoc, PaymentModel>('Payment', PaymentSchema);
+export { Payment };
+
+Realmente sólo necesitamos el orderId y el chargeId(ya se buscaría toda la info con estos campos).
+NOTA:aún faltaría crear el registro en el controlador!
+
+				VIDEO 464 TESTING PAYMENT CREATION
+
+IMPORTANTE: en la stripe API podemos ver que la respuesta va a tener la propiedad _id con el id del charge para ellos.Despues,si quisiera ver ese charge simplemente apunto a ese id con el método retrieve:
+>stripe.charges.retrieve(_id,cb(error,data))
+
+El controlador quedaría asi,sabiendo que ellos me dan el stripeId y yo ya tengo el orderId
+   const charge = await stripe.charges.create({
+         currency: 'usd',
+         amount: order.price * 100,
+         source: token,
+         description: 'Charge for orderId: ${orderId}',
+      });
+
+      const payment = Payment.build({
+         orderId: orderId,
+         stripeId:charge.id
+      });
+      await payment.save();
+
+Hagamos un pequeño test sobre esto:
+* Concatenamos esto
+      expect(stripeCharge).toBeDefined();
+
+      const payment = await Payment.findOne({
+        orderId: order.id,
+        stripeId: stripeCharge!.id,
+      });
+
+      expect(payment).not.toBeNull();
+NOTA: fijate que en un lado he usado toBeDefined y en otro notToBeNull.Esto es asi porque uno es la respuesta del find(y array.find devuelve o el elemento | undefined) mientras que findOne devuelve el elemento o null.
+Por esto hay que usar diferentes comparadores,porque no es lo mismo undefined que null(además que fallaría toBeNull con un undefined pasando el test)
+
+Tras comprobar que tiene éxito el test,aún nos quedaría publicar el evento charge:created
+
+				VIDEO 465 PUBLISHING A PAYMENT CREATED EVENT
+
+Stephen se ha dado cuenta que llamar charge:created y Charge al schema podia confundirnos con la stripe APi,que devuelve un charge.Asi que cambiaremos el nombre tanto del Schema(que ya lo hemos echo) como del evento por payment:created que semánticamente parece más correcto.
+Tras crearlo deberiamos publicarlo y ya veremos que hacen los demás servicios con él.
+
+Como siempre,hay que ir hasta el common module y crear toda la lógica:
+ export interface PaymentCreatedEvent {
+   subject: Subjects.PaymentCreated;
+    data: {
+      id: string;
+      orderId: string;
+      stripeId: string;
+    };
+  }
+De nuevo parece que el campo stripeId no es muy necesario pero es mejor dejarlo ahora que ponerlo despues.
+Recuerda exportarlo desde el index:
+export * from './events/payment-created-event';
+Publico de nuevo el common module y actualizo el payments,orders y tickets,pues lo necesitarán los tres(el payment:created).
+
+* Despues tras crear el payment en la Db lo publico
+    const payment = Payment.build({
+         orderId: orderId,
+         stripeId:charge.id
+      });
+      await payment.save();
+
+      await new PaymentCreatedPublisher(natsWrapper.client).publish({
+         id: payment.id,
+         orderId: payment.orderId,
+         stripeId: payment.stripeId,
+      });.
+Fijate que prefiero esperar antes de mandar la respuesta y que prefiero usar los campos que se guardaron en la db,ya que sus valores son los últimos.
+
+				VIDEO 467 MARKING AN ORDER AS COMPLETE
+
+Por último vamos a recibir este evento en el Orders srv y marcar esa orden como Completed.La clase y la lógica no puede ser más sencilla sabiendo que el evento me proporciona un orderId:
+
+export class PaymentCreatedListener extends Listener<PaymentCreatedEvent> {
+  readonly subject = Subjects.PaymentCreated;
+  queueGroupName = queueGroupName;
+
+  async onMessage(data: PaymentCreatedEvent['data'],
+    msg: Message) {
+      // recuerda que el payment:created me trae un orderId
+    const order = await Order.findById(data.orderId);
+
+    if (!order) {
+      throw new Error('Order not found');
+    }
+
+    order.set({
+      status: OrderStatus.Complete,
+    });
+    await order.save();
+
+    msg.ack();
+  }
+}
+Recuerda ir al index.ts y crear una instancia de esta clase para escuchar por el evento.
+new PaymentCreatedListener(natsWrapper.client).listen();
+
+IMPORTANTE: dado que no esperamos hacer nada más tras poner la Order en Completed no vamos a emitir nada,pero si no fuera así,y tuvieramos que realizar más cosas habría que emitir aqui eso:
+ order.set({
+      status: OrderStatus.Complete,
+    });
+    await order.save();
+    // aqui deberia publicar que se ha actualizado una orden,pero como la ponemos en completed realmente no hacen falta mas pasos,pero,ojo, si harian falta si no fuera el último 
+
+NOTA: recuerda que hay que mirar si una orden estaba cancelada:
+      if (order.status === OrderStatus.Complete) {
+         return msg.ack();
+      }
+   
+      order.set({
+         status: OrderStatus.Cancelled,
+      });
+

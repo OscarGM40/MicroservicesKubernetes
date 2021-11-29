@@ -11,6 +11,9 @@ import {
 
 import { Order } from '../models/Order'
 import { stripe } from '../stripe';
+import { Payment } from '../models/Payment';
+import { PaymentCreatedPublisher } from '../events/publishers/payment-created-publisher';
+import { natsWrapper } from '../nats-wrapper';
 
 
 const router = express.Router();
@@ -42,21 +45,36 @@ router.post('/api/payments',
       // recuerda que requireAuth me deja hacer req.currentUser! porque si pasó requireAuth hay un req.currentUser fijo.
       if (order.userId !== req.currentUser!.id) {
          throw new NotAuthorizedError();
-      }  
+      }
 
-      if(order.status === OrderStatus.Cancelled) {
+      if (order.status === OrderStatus.Cancelled) {
          throw new BadRequestError('Order already cancelled.Cannot pay for an cancelled Payment Order');
       }
 
-      await stripe.charges.create({
+      const charge = await stripe.charges.create({
          currency: 'usd',
          amount: order.price * 100,
          source: token,
          description: 'Charge for orderId: ${orderId}',
       });
 
+      const payment = Payment.build({
+         orderId: orderId,
+         stripeId: charge.id
+      });
+      await payment.save();
 
-      res.status(201).send({sucess: true});
+      await new PaymentCreatedPublisher(natsWrapper.client).publish({
+         id: payment.id,
+         orderId: payment.orderId,
+         stripeId: payment.stripeId,
+      });
+
+      res.status(201).send({
+         id: payment.id,
+         success: true
+      });
+
    })
 
 export { router as createChargeRouter };
