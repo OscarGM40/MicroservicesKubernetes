@@ -585,3 +585,114 @@ IMPORTANTE: es aqui donde viene toda la razón de ser de las interfaces en TS(re
 Es aqui donde esta interfaz Reportable se comporta como una clase abstracta,cada objeto que sea de ese tipo desarrollará la funcion summary de la forma que desee(métodos abstractos).
 
 NOTA:es por todo esto que los objetos deben estar tipados con una interfaz.Esa interfaz definirá las reglas a cumplir
+
+					VIDEO 609 CLASSES 
+
+Una clase es un 'plano' para poder crear un objeto con algunos campos y métodos que representarán algo del mundo real.
+El nombre de una clase siempre va Capitalizado:
+
+class Vehicle { 
+
+  drive():void {
+    console.log("chugga chugga");)   
+  }
+}
+
+
+const vehicle = new Vehicle();
+vehicle.drive();
+Para instanciar un objeto se usa la keyword 'new'.
+
+				VIDEO 610 BASIC INHERITANCE
+
+EN TS hay herencia de clases,se usa la keyword 'extends'.Recuerda que también hay herencia de interfaces.Fijate que en el ejemplo siguiente hay sobreescritura(override de métodos) como en cualquier lenguaje POO.
+
+class Vehicle { 
+  drive():void {
+    console.log("chugga chugga")   
+  }
+  honk():void {
+    console.log("beep")
+  }
+}
+
+
+const vehicle = new Vehicle();
+vehicle.drive();
+vehicle.honk();
+
+class Car extends Vehicle {
+  drive():void {
+    console.log("vroom")
+  }
+}
+const car = new Car();
+car.drive();
+
+				VIDEO 611 CLASS METHOD MODIFIERS
+
+Los modificadores son palabras reservadas que puedo usar en un método para modificar su nivel de acceso:
+
+public: visible por todos(modificador por defecto)
+private: sólo visible dentro de la misma clase que lo define.Puede ser útil para que lo usen otros métodos con mismo o diferente nivel de acceso dentro de esa clase,en su lógica.
+protected: visible dentro de la misma clase o de cualquier otra que herede de la primera.
+
+Recuerda que el modificador por defecto es public.
+NOTA:la razón de marcar métodos como privados suele ser restringir el acceso a métodos que puedan manipular severamente una clase o un resultado.
+Como resultado de este método tan peligroso se le etiqueta como privado para el resto de developers.
+
+					VIDEO 612 FIELDS AND CONSTRUCTORS
+
+IMPORTANTE:en TS si una clase hereda de otra también hereda su constructor.Un constructor es un método que se invoca automáticamente al crear una instancia de una clase.Sirve para inicializar propiedades:
+
+class Vehicle {
+  color: string;
+  constructor(color: string) {
+    this.color = color;
+  } 
+
+  public drive(): void {
+    console.log("chugga chugga")
+  }
+  public honk(): void {
+    console.log("beep")
+  }
+}
+const vehicle = new Vehicle('orange');
+	
+NOTA: hay un shortcut para no tener que crear la propiedad e inmediatamente despues pasarla por argumento.Simplemente hay que pasar el argumento con un modificador de acceso de tipo public:
+
+class Vehicle {
+  constructos( public color:string) <- esto crea una propiedad color:string(con acceso public)
+NOTA:de igual manera se puede catalogar una propiedad como private y sólo será accesable en esa clase.
+
+				VIDEO 613 FIELDS ALONG WITH INHERITANCE
+
+TS automáticamente llama al constructor de la clase Base si una clase hija no define uno.Es por esto que vemos el error en new Car() ya que no he definido un constructor para Car y esta llamando al de Vehicle y espera un color
+
+IMPORTANTE: en cuanto defina un constructor en la clase hija tendré que hacer una llamada al del padre,pasandole cuantos argumentos fuera necesario:
+
+class Car extends Vehicle {
+
+  constructor(public wheels:number,color:string){
+    super(color); <- debo llamar al constructor padre y pasarle el color
+  }
+Fijate que public wheels es el shortcut y va a crear una propiedad wheels en esta clase pero color:string no va a crear una propiedad en esta clase.
+
+const car = new Car(4,'blue');
+
+Por último,usar y dominar la POO es básico,creando código reusable y desacoplado.
+
+					VIDEO 615 FIRST WEB APP
+
+Vamos a crear una pequeña app web de Users y Companies.MOstraremos su ubicación en un GoogleMaps con un marcador(para el User y su Company).El objetivo es entender como funcionan las clases + interfaces en una aplicación real.
+
+NOTA: para poder correr TS en el browser voy a necesitar una libreria CLi llamada parcel-bundler.Se instala en global:
+>npm i -g parcel-bundler
+NOTA: instalar la version 1.12.3
+'npm i --g parcel-bundler@1.12.3'
+O usar 'parcel' pues cambió de nombre el módulo.
+
+				VIDEO 616 BUNDLING WITH PARCEL
+
+

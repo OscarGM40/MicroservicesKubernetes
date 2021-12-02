@@ -157,4 +157,118 @@ Realmente con este hook es sencillísimo hacer peticiones de cualquier tipo,a cu
 
 				VIDEO 476 LISTING ALL TICKETS
 
+Cuando el usuario cree un ticket vamos a redireccionarlo al / donde se verán todos los tickets.Para redireccionar en Next y otras operaciones hay que usar su enrutador:
+
+import Router from 'next/router';
+* Simplemente uso el método push
+onSuccess: () => Router.push("/"),
+
+Para obtener todos los tickets hay que hacer una petición en el getInitialProps de ese componente.
+
+  const ticketList = tickets.map(ticket => (
+    <tr key={ticket.id}>
+      <td>{ticket.title}</td>
+      <td>{ticket.price}</td>
+    </tr>
+  ))
+Simplemente es hacer la UI.
+
+						VIDEO 477 LINKING TO WILDCARDS
+
+Recuerda que cuando cree un file tipo [ticketId].js eso es un param obligatorio y me será proveido en el objeto context.De nuevo para usar un <anchor> en Next tengo que usar su componente Link.
+
+* En el componente puedo hacer peticiones y pasarlas al mismo componentee
+LandingPage.getInitialProps = async (context,client,currentUser) => {
+  const response = await client.get('/api/tickets');
+  return { 
+    tickets: response.data <- fijate que retorno 'tickets'
+  };
+
+* Ahora saco de las props todo lo necesario.
+const LandingPage = ({ currentUser,tickets }) => {
+
+Además,como es un archivo wildcard voy a tener que usar 'href' + 'as' en el Link.Esto es asi,el primero es la ruta al archivo,el segundo son los argumentos:
+
+import Link from 'next/link';
+
+   <Link 
+      href="/tickets/[ticketId]" 
+      as={`/tickets/${ticket.id}`}>
+      <a>View</a>
+   </Link>
+
+					VIDEO 478 CREATING AN ORDER
+
+ Vamos a seguir trabajando en este [ticketId].js .Haremos una petición inicial para recuperar el ticket con el id que viene como .Fijate que en este componente el objeto context es fundamental para extraer el id de la url
+
+TicketShow.getInitialProps = async (context,client) => {
+  const { ticketId } = context.query;
+  const ticket = await client.get(`/api/tickets/${ticketId}`);
+  return { ticket: ticket.data };
+}
+
+Recuerda que el propósito de este componente aparte de visualizar el ticket es mostrar un botón 'Purchase' para comprar el ticket(lo cual crea una order).
+ 
+  const { doRequest, errors } = useRequest({
+    url: '/api/orders',
+    method: 'post',
+    body: {
+      ticketId: ticket.id
+      },
+      onSuccess: (order) => console.log(order)
+      });
+
+  return (
+    <div>
+      <h1>{ticket.title}</h1>
+      <h4>{ticket.price}</h4>
+      {errors}
+      <button 
+        className="btn btn-primary"
+        onClick={doRequest}
+       >Purchase This Ticket
+       </button>
+
+Realmente con el hook y sabiendo como va Next es muy sencillo
+
+				VIDEO 479 PROGRAMMATIC NAVIGATION TO WILDCARDS
+
+Vamos a crear otro archivo wildcard para ver la Order.Fijate que para rescatarlo fue por el nombre entre [] + context.query( y que efectivamente son parámetros opcionales de la queryString).
+
+Bien,recuerda que para poder navegar a este tipo de archivos antes tuve que usar href+as.Esta vez habrá que usar dos argumentos con la misma sintaxis,ya que vamos a usar el método estático Router.push:
+
+  onSuccess: (order) => Router.push(
+      "/orders/[orderId]", `/orders/${order.id}`),
+Fijate que el primero es la ruta al archivo y el segundo la url a mostrar.
+Asi es como se navega programáticamente en Next a files con wildcards.
+
+				VIDEO 480 THE EXPIRATION TIMER
+
+Lo primero es pedir la order rescatando de los argumentos de la queryString que vendrán.REcuerda params para los obligatorios y query para los opcionales.
+
+OrderShow.getInitialProps = async (context,client) => {
+  const { orderId } = context.query
+  const { data } = await client.get(`/api/orders/${orderId}`)
+  return { order: data }
+
+* Habrá que calcular cada segundo el timer.
+
+ const [timeLeft,setTimeLeft] = useState(0);
+
+  useEffect(() => {
+    const findTimeLeft = () => {
+      const msLeft = new Date(order.expiresAt) - new Date();
+      setTimeLeft(Math.round(msLeft / 1000));
+    };
+    // dado que el interval va a tardar un segundo tengo que llamar yo la primera vez a la función
+    findTimeLeft();
+    // para limpiar el intervalo hay que asignarlo
+    const timerId = setInterval(findTimeLeft, 1000);
+    return () => {
+      clearInterval(timerId);
+    };
+  }, [order]);
+
+					VIDEO 481 SHOWING THE STRIPE FORM
+
 

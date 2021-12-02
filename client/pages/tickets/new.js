@@ -1,5 +1,6 @@
 import { useState } from "react";
 import useRequest from "../../hooks/use-request";
+import Router from "next/router";
 
 const NewTicket = () => {
   const [title, setTitle] = useState("");
@@ -13,7 +14,7 @@ const NewTicket = () => {
       title,
       price,
     },
-    onSuccess: (data) => console.log(data),
+    onSuccess: () => Router.push("/"),      
   });
 
   const onBlur = () => {
