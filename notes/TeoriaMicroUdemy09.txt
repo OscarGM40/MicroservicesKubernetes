@@ -1,0 +1,160 @@
+					SECCION 22 BACK TO THE CLIENT
+
+			VIDEO 470 A FRE MORE PAGES
+
+Ya tenemos las rutas /auth/signin | signout | signup y el index.Crearemos /tickets/new para crear un ticket, /tickets/:ticketId para visitar ese ticket y /orders/:orderId para mostrar info sobre una order+payment.
+REcuerda que en Next.js un param obligatorio se creaba con corchetes y su nombre como nombre de archivo(tickets[ticketid].js).
+Recuerda también que para crear rutas en Next debe ser dentro del folder pages y subrutas como /tickets/xxx hay que crear ese subdirectorio(subdirectorio==subruta).
+
+			VIDEO 471 QUICK REMINDER ON FETCHING DATA IN NEXT
+
+En una app Next hay un AppComponent que es el padre de todos.Este componente no sólo es el padre de todos,sino que también los provee con sus props.Está en el archivo _app.js:
+
+const _app = ({ Component, pageProps, currentUser }) => {
+
+* Puedo ver que surte a todos de sus pageProps(de sus props) y que en él se renderiza cada componente.
+  
+  return (
+    <div>
+      <Header currentUser={ currentUser} /> 
+      <Component {...pageProps} />
+    </div>
+  )
+NOTA: Next por defecto va a llamar al getInitialProps del AppComponent si lo tiene implementado,como es nuestro caso,pero no va a llamar a ningun otro(como nuestro LandingPage.getInitialProps).Es a éstos a los que tengo que invocar yo manualmente
+Fijate que siempre lo controla todo este AppComponent,es aqui donde declaramos que si un componente llama a getInitialProps le pasaremos el resultado como props
+
+  // LLamada para el app.getInitialProps
+    const client = buildClient(appContext.ctx)
+    const { data } = await client.get('/api/users/currentuser');
+
+    // llamada para el hijo
+    let pageProps = {};
+    if (appContext.Component.getInitialProps) {
+      pageProps = await appContext.Component.getInitialProps(appContext.ctx);
+    };
+
+Y fijate como incluso el AppComponent también pregunra por el currentUser,no sólo el LandingPage.Y es por esto que veré dos peticiones GET para obtener el user.
+Esto es un error que nos dejamos,pues no hace falta hacer dos peticiones.La haremos en el _app.js y se la pasaremos hacia abajo al LandingPageComponent.
+
+				VIDEO 472 TWO QUICK FIXES
+
+Realmente es muy sencillo corregir este error.En vez de hacer una segunda petición le paso por props el valor:
+
+const AppComponent = ({ Component, pageProps, currentUser }) => {
+  return (
+    <div>
+      <Header currentUser={currentUser} />
+      <Component currentUser={currentUser} {...pageProps} />
+    </div>
+  );
+};
+* REcuerda que en un archivo de Next hay dos contextos.El anterior es para el frontend,y todo lo que esté afuera es para el backend.Asi que hago la petición aqui y le mando a todos los componentes el currentUser.
+NOTA:fijate que conveniente es hacer peticiones en este punto alto de la aplicación(el punto más alto).
+
+NOTA: en vez de tener que importar el helper y crear una nueva instancia de axios cada componente que quiera usar getInitialProps,puedo abastecer la instancia desde el padre de todos AppComponent:
+  
+// LLamada para el app.getInitialProps
+  const client = buildClient(appContext.ctx);
+  const { data } = await client.get("/api/users/currentuser");
+
+// llamada para el hijo
+  let pageProps = {};
+  if (appContext.Component.getInitialProps) {
+    pageProps = await appContext.Component.getInitialProps(
+     appContext.ctx,client,data.currentuser)
+ } <- la paso como segundo argumento del await appContext.Component.getInitialProps.NO solo eso sino que le paso también la respuesta(aqui si que tengo el user.id,el email y el token.Puedo pasar cuanto quiera desde el padre alias Jesucristo.
+
+Cada componente lo pedirá asi,en orden:
+LandingPage.getInitialProps = async (context,client,currentUser) => {
+  return {};
+};
+
+			VIDEO 473 SCAFFOLDING A FORM
+
+Creamos un simple form:
+const NewTicket = () => {
+  return (
+    <div className="container">
+      <h1>Create New Ticket</h1>
+      <form>
+        <div className="form-group">
+          <label htmlFor="title">Title</label>
+          <input type="text" className="form-control" id="title" placeholder="Enter title" />
+        </div>
+        <div className="form-group">
+          <label htmlFor="price">Price</label>
+          <input type="number" className="form-control" id="price" placeholder="Enter price" />
+        </div>
+        <button className="btn btn-primary">Create Ticket</button>
+      </form>
+    </div>
+  );
+};
+
+export default NewTicket;
+
+				VIDEO 474 SANITIZING PRICE INPUT
+
+Cualquier currency mundial sólo funcionará con céntimos asi que hay que controlar si el usuario introduce 0.000004 por ejemplo.Redondearemos a dos decimales:
+
+const onBlur = () => {
+  const value = parseFloat(price);
+
+  // si es un string
+  if (isNaN(value)) {
+    return;
+  }
+
+  setPrice(value.toFixed(2));
+};
+Nada que no pueda hacer toFixed.
+
+					VIDEO 475 TICKET CREATION
+
+Recordando nuestros endpoints tenemos que hacer una petición POST a /api/tickets.Dado que estamos en Next tenemos tres formas de hacer una petición.
+En este caso getInitialProps no me vale pues es una petición posterior al primer renderizado de un componente.
+NOTA:practicar sobre propiedades computadas.
+REcuerda que es igual axios.get que axios[get] luego:
+const doRequest = async (method,uri,options) => {
+  return await axios[method](uri,options)
+
+IMPORTANTE:fijate que el hook que hicimos realiza una petición y si lo deseo me devuelve la respuesta:
+
+const useRequest = ({ url, method, body, onSuccess }) => {
+    const [errors, setErrors] = useState(null);
+    const doRequest = async () => {
+        try {
+            setErrors(null)
+            const response = await axios[method](url, body);
+            // si al llamar a este hook le paso una cuarta opcion ese argumento será funcion callback que resuelva en la response.data cuando quiera en ese componente.
+            if (onSuccess) {
+                onSuccess(response.data);
+            }
+            return response.data;
+
+Fijate también que no es lo mismo useRequest({url,method,body,onSuccess}) que useRequest(url,method,body,onSuccess).El primero es SÓLO UN ARGUMENTO,el segundo cuatro.
+
+const {doRequest, errors } = useRequest({
+    url: '/api/tickets',
+    method: 'post',
+    body: {
+        title,
+        price
+    },
+    onSuccess: (data) => console.log(data)
+});
+Realmente con este hook es sencillísimo hacer peticiones de cualquier tipo,a cualquier endpoint y con cualquier payload,además de ver la respuesta y los errores formateados.Genial.
+
+ const handleSubmit = (e) => {
+    e.preventDefault();
+    doRequest();
+  };
+
+  return (
+    <div className="container">
+      <h1>Create New Ticket</h1>
+      <form onSubmit={handleSubmit}>
+
+				VIDEO 476 LISTING ALL TICKETS
+
+

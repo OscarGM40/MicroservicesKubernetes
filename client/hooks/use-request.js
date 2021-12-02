@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useState } from "react";
 
+// fijate que es un objeto,no 4 argumentos,es solo uno
 const useRequest = ({ url, method, body, onSuccess }) => {
 
     const [errors, setErrors] = useState(null);
@@ -10,6 +11,7 @@ const useRequest = ({ url, method, body, onSuccess }) => {
         try {
             setErrors(null)
             const response = await axios[method](url, body);
+            // si al llamar a este hook le paso una cuarta opcion ese argumento será funcion callback que resuelva en la response.data cuando quiera en ese componente.
             if (onSuccess) {
                 onSuccess(response.data);
             }
