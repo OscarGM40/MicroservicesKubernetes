@@ -271,4 +271,136 @@ OrderShow.getInitialProps = async (context,client) => {
 
 					VIDEO 481 SHOWING THE STRIPE FORM
 
+REcuerda que vamos a usar stripe para los pagos,y que me iban a devolver un token que tengo que enviar al backend.
+Cuando el usuario complete su formulario me darán ese token en el front,y se manda al backend.Lógicamente hay que instalar su librería.
+>npm i react-stripe-checkout
+
+ahora me importo su HOC,el cual es un botón para pagar que abre su folder:
+import StripeCheckout from 'react-stripe-checkout'.
+
+Y lo añado en mi frontend.Me pedirán la publishable key(la key publica) y me devuelve el token en una callback en la propiedad token:
+    <StripeCheckout
+      token={(token) => console.log(token)}
+      stripeKey="pk_test_.." />
+Fijate que aunque sea una clave pública debería usar una variable de entorno.En Next cambia un poco(ya que alcanza servidor y navegador),lo que hay que hacer es crear un '.env.local' .Despues si antepongo NEXT_PUBLIC a la variable será para el browser y si no pongo nada es para el backend.Ejemplo:
+SITE_URL=localhost <- para el backend
+NEXT_PUBLIC_PAYMENT_TOKEN=xxx <-esta es expuesta en el browser.
+
+  <StripeCheckout
+      token={(token) => console.log(token)}
+      stripeKey={process.env.NEXT_PUBLIC_STRIPE_KEY}
+      amount={order.ticket.price*100}
+      email={currentUser.email}
+           />
+
+Fijate que es imprescindible hoy en dia mandar el email del comprador
+	
+				VIDEO 485 TEST CREDIT CARD NUMBERS
+
+Si voy a https://stripe.com/docs/testing veré la documentación sobre testing.
+Hay muchos numeros de tarjeta.Parece que en todos puedo usar cualquier fecha futura para la caducidad y cualquier CVC de 3 digitos(4 para una American Express).
+El más fácil de recordar es 4242424242...
+Puedo ver que el objet literal que me devuelve la callback token tiene el token a mandar en su propiedad id.
+
+				VIDEO 486 PAYING FOR AN ORDER
+
+Volviendo al payments srv vemos que tenemos que hacer una petición a /api/payments donde se mirará por los campos token y orderId además de que sea un usuario autenticado.
+En nuestro caso tenemos un problema,ya que sólo tenemos una oportunidad para mandar el id,vamos a tener que retocar nuestro hook useRequest para que la función doRequest admita argumentos opcionales y vayan para el body:
+
+token={ ({id}) => doRequest({ token: id })}
+
+Este argumento será un objeto,por si en un futuro escalara esta app:
+    const doRequest = async (props={}) => {
+
+        try {
+            setErrors(null)
+            const response = await axios[method](url,
+                {...body, ...props});
+
+Pero tan pronto como haga esto voy a tener un error en cada uno de estos:
+onClick={doRequest} ya que con esta forma el primer argumento es pasado automaticamente a la funcion(y el argumento es el evento onClick).Lógicamente da fallo al querer meterlo en el body de la petición.
+
+La solución es no usar la forma corta.
+ onClick={() => doRequest()}>
+De esta forma la función es invocada con 0 argumentos.Fijate que ambas zonas de paréntesis no tienen nada que ver una con otra.
+
+					VIDEO 487 FILTERING RESERVED TICKETS
+
+Fijate que cuando un ticket es pagado ya no está disponible,pero lo seguimos mostrando.Sería mejor filtrarlo,ya que no se puede pagar más veces(esta reservado).
+Recuerda que es la existencia de la propiedad orderId la que dictamina si un ticket está siendo reservado.
+
+Lo mejor es retocar el endpoint que devuelve los tickets y que ahora devuelve todos por:
+const tickets = await Ticket.find({orderId:undefined});
+
+						VIDEO 488 HEADER LINKS
+
+Realmente nos faltan algunos links en la navbar.Es muy sencillo:
+    currentUser && { 
+          label:'Sell Tickets', href:'/tickets/new'  
+        },
+        currentUser && { 
+          label:'My Orders', href:'/orders'  
+        },
+Sin embargo,nos falta el file para ver las orders de un user
+
+					VIDEO 489 RENDERING A LIST OF ORDERS
+
+Creamos pues ese file /pages/orders/index.js y lo que sea que ponga en ese componente será lo que se muestre en el GET a /orders 
+Fijate que ya tenemos el endpoint bien,filtrando por el usuario actual:
+
+   const orders = await Order.find({
+        userId: req.currentUser!.id,
+    }).populate('ticket');
+
+Asi que el componente no puede ser más sencillo,ya que hará la petición en el getInitialProps:
+
+const OrderIndex = ({ orders }) => {
+  const orderList = orders.map((order) => (
+    <tr key={order.id}>
+      <td>{order.ticket.title}</td>
+      <td>{order.status}</td>
+      <td>
+        <Link href="/orders/[orderId]" as={`/orders/${order.id}`}>
+          <a>View Order</a>
+        </Link>
+      </td>
+    </tr>
+  ));
+
+  return (
+    <div className="container mt-4">
+      <h1>My Orders</h1>
+      <table className="table table-striped table-hover table-light">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody>{orderList}</tbody>
+      </table>
+    </div>
+
+Es obvio que quedaría por hacer todo el frontend de la app.Pero como introducción a Kubernetes creo que ha cumplido de sobra su cometido.
+
+					SECCION 23 CI/CD & DEPLOY
+
+ESta sección va a ser muy divertida.Fijate que múltiples equipos de trabajo deben ser capaces de trabajar cada uno en un Servicio a la vez.
+Además deberán ser capaces de mergear estos trabajos y hacer un redeploy sin tener conflictos ni errores.
+Para controlar todo esto necesitaré entender el Workflow.Stephen me aconseja así:
+* EN LOCAL
+1- Hacer cambios al código en un determinado servicio
+2- Hacer el commit a cualquier rama que no sea la master
+3- Hacer el push de esa rama a Github
+* EN GITHUB/REMOTO
+1- Github recibe la rama actualizada
+2- Manualmente creo una PR para mergear esta nueva rama en la master
+3- Configuraremos Github para que corra todos los test en el proyecto tras recibir esta PR
+4- Cuando pasen los test, mergearé la PR en la master
+5- Configuraremos github para que automáticamente haga un build y redeploy a un live kubernetes cluster si la master cambia(que lo hace en el merge de la PR)
+
+				VIDEO 491 GIT REPOSITORY APPROACHES
+
+
 
