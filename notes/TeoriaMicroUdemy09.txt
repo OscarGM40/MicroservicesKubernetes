@@ -402,5 +402,99 @@ Para controlar todo esto necesitaré entender el Workflow.Stephen me aconseja as
 
 				VIDEO 491 GIT REPOSITORY APPROACHES
 
+Normalmente hay dos acercamientos posibles para usar Git en un entorno de Microservices.
+1º: usar un 'monoRepo'.Un único repo vigila por todos 
+2ª: usar un 'repo per service'.Un repo por cada microservicio.
+
+Aunque pueda parecer que la segunda opción es mejor,incluso grandes compañias usan la primera.Esto tiene su razón de ser,ya que cada vez que se crea un repositorio hay mucho trabajo por detrás.
+Puedo que haya que crear keys,habrá que configurar los pipelines.Es un montón de trabajo extra innecesario.
+Sin embargo usar un monoRepo también tiene sus downsides como veremos más adelante,aún asi,es la opción que tomaremos.
+
+NOTA:fijate que sólo ignoró 'node_modules'.Es recursivo?
+NOTA:usaremos GitHub para tener acceso a las GitHub Actions y asi ejecutar los test automáticamente.
+
+Con todo esto en mente creo un repo local,stageo,commiteo y hago el push.
+
+					VIDEO 492 GITHUB ACTIONS
+
+Tenemos que configurar a GitHub para que realize los tests cada vez que reciba una PR?o que haga el merge de ella?.
+
+NOTA: En GitHub,cada vez que se realiza una acción(como crear una PR,cerrar una PR,hacer un Fork,incluso hacer un simple Push,...) se crea un Event internamente en GitHub.
+Cuando un evento ocurre puedo lanzar una acción(GitHubActions).Una GitHub Action es un pequeño script donde poner cualquier código(ejecutar comandos,run tests,deploys,...)
+Vamos a crear una Action para cuando 'se cree una PR'.También nos aseguraremos que se ejecuta la misma action si se 'actualiza la PR'.Esta accion ejecutará todos los tests.
+Si alguno falla se nos informará en la PR.
+
+Sea como sea voy a la pestaña Actions y eligo crear la mía.Fijate que es un .yml
+Lo renombramos a tests.yml(ya que va a ejecutar los tests).
+
+Habrá que especificar cuando ejecutar la acción y qué comandos ejecutar:
+
+#name es el nombre de este workflow
+name: tests
+# cuando disparar el job
+on: 
+  pull_request
+
+#puedo crear varios jobs,cada uno con sus steps 
+jobs: 
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2<-prebuilt action que simplemente toma todo el código
+      - run: cd auth && npm install && npm run test:ci <- ejecuta este comando
+
+NOTA: no tenemos este comando test:ci en el package.json(solo tengo test y start en auth).Este comando hay que crearlo.Y hay que crearlo porque el npm run test se queda en --watch y queremos ejecutar sólo UNA vez el test y salir.
+
+Guardo el archivo(usando start commit).En el siguiente video crearemos una PR y veremos que sucede.
+
+NOTA. la imagen de Github que se usará ya tiene npm o yarn instalados,lógicamente
+
+Es una sintaxis que iré aprendiendo.Fijate que puedo incluso especificar las ramas con barnches: [name1,name2,name3]:
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+				VIDEO 493  ADDING A CI TEST
+
+Asi pues voy al microservicio 'auth' y añado el nuevo script:
+"test:ci":"jest"
+IMPORTANTE:fijate que he creado un commit en el remoto,asi que hay que hacer fetch+merge(que es un pull)
+>git pull origin master
+>git add commit push ...
+
+Fijate que hay varios posibles errores ya que tiene la gente
+
+				VIDEO 494 RUNNING TEST ON PR CREATION
+
+simplemente agrego un console.log en el microservicio.Recuerda que los PR son siempre en otra rama.
+NOTA:puedo ignorar los archivos temporales de vim con *~ si terminan en virgulilla o con *.swp y *.swo(hay gente que dice que use *.sw* por si cambia el ultimo caracter)
+
+Asi que hago algun cambio y despues creo una nueva rama(fijate que el orden es importante:
+git checkout -b dev
+git add y commit
+git push origin newBranch
+
+Ahora creo manualmente en GitHub el PR hacia master.Voy al repo y a PRs y debería ver xxx has pushed changes y el boton 'compare & pull request' pero si no lo veo la creo yo con new pull request.
+Importante la rama base es master(compare es la mia)
+
+Es hora de hacer la pull request.Esto disparará los test.Afortunadamente me pasan,pero puede haber muchos fallos(algunos tienen fallo de permisos de jest).
+NOTA: fijate que si el repo es privado tendré que configurar la autenticación.
+Una vez hayan pasado se podría aceptar el merge con la PR.Pero antes vamos a ver que sucede cuando falle.
+
+					VIDEO 495 OUTPUT OF FAILING TESTS
+
+Vamos a hacer que un test falle.Fijate que no tengo que crear otra PR.Dado que ya he creado una,los commits se irán agregando a esa PR
+En un test cualquiera cambio el status de la respuesta.Ahora hago el add commit y push y veré como fallan los test.
+NOTA:aunque la GitHub Action falle aún podría hacer el merge pull request pero lógicamente no es lo que querriamos hacer con un test fallando.
+Simplemente reenviamos de nuevo la status code correcta.
+En los próximos videos vamos a ver como ejecutar todos los tests de nuestro proyecto en paralelo(no sólo uno como ahora tenemos)
+
+				VIDEO 496 RUNNING TESTS IN PARALLEL
+
+
+
 
 
