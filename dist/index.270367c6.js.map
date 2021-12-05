@@ -1,0 +1,1 @@
+{"mappings":"AAKA,OAAO,CAAC,GAAG,CAAC,CAA0B","sources":["ts-appendix/maps/src/index.ts"],"sourcesContent":["\n\n\n\n\nconsole.log('hi there from typescript')"],"names":[],"version":3,"file":"index.270367c6.js.map","sourceRoot":"/__parcel_source_root/"}

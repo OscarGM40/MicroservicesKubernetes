@@ -690,9 +690,203 @@ Vamos a crear una pequeña app web de Users y Companies.MOstraremos su ubicació
 NOTA: para poder correr TS en el browser voy a necesitar una libreria CLi llamada parcel-bundler.Se instala en global:
 >npm i -g parcel-bundler
 NOTA: instalar la version 1.12.3
-'npm i --g parcel-bundler@1.12.3'
+'npm i -g parcel-bundler@1.12.3'
 O usar 'parcel' pues cambió de nombre el módulo.
 
 				VIDEO 616 BUNDLING WITH PARCEL
 
+Parcel trabaja de esta forma: puedo crear un index.html con un <script> que use un .ts .Parcel compilará ese ts a js para el browser.
+Parcel es una herramienta fantástica para configurar rápidamente un pequeño proyecto que use Typescript.
 
+Por ejemplo,nosotros usaremos:
+ <script src="./src/index.ts"></script> 
+
+PAra ejecutar parcel simplemente apuntar al .html.Parcel trae un servidor web embebido
+npx parcel src/index.html <- en mi caso no está dentro del src(y no necesito a npx)
+Hay varias formas de configurar y ejecutar parcel.Parcel ejecutará el servidor embebido en el puerto 1234
+NOTA: Parcel lo que hace es compilar a js e inyectar ese archivo:
+<script src="/index.270367c6.js"></script> <- le pondrá cualquier hash random
+
+					VIDEO 617 PROJECT STRUCTURE
+
+En total se nos presentan 3 clases: Map.ts User.ts y Company.ts.
+Recuerda que la convención dicta que si un archivo sirve para crear una clase y exportarla su nombre debe ir capitalizado.
+
+NOTA:una vez que declare una propiedad puedo asignarla un valor en la misma linea on el el constructor:
+
+export class User {
+  name: string;
+  location:{
+    lat: number,
+    lng: number
+  };
+  constructor(){}
+}
+
+				VIDEO 619 GENERATING RANDOM DATA
+
+Vamos a generar fake data con el módulo faker de npm.Este paquete otorga la habilidad de generar random data de diferentes tipos,lo cual es genial.Es un paquete muy ligero.
+Doc: https://www.npmjs.com/package/faker
+
+La doc no es muy clara,pero puedo usar diferentes módulos(name,phone,random) y despues un método sobre ellos:
+
+const randomName = faker.name.firstName()
+const phone = faker.phone.phoneNumber()
+Puedo ver que en el módulo address tengo a latitude y longitude.
+Para importarlo puedo usar import,sin embargo me dará el siguiente error:
+Could not find a declaration file for module 'faker'
+
+					VIDEO 620 TYPE DEFINITION FILES
+
+Cuando trabaje en TS voy a ver muchas veces este error.Realmente al trabajar en TS yo puedo usar cualquier libreria JS(como faker) pero TS no sabŕa los tipos de esta libreria.
+Dado que la libreria está en JS,TS me da este error.La solución son los 'type definition files'.
+Puedo ver estos type definition files como adaptadores entre JS y TS.Este file o adaptador tiene el tipado de toda la libreria.
+Algunas librerias como axios ya incluyen los archivos con los types para TS,es por esto que no tuve que hacer nada en los dos proyectos.
+
+NOTA: dado que es imposible saber cuando una libreria incluye sus tipos o no,simplemente puedo mirar por este error.Si un módulo me dice que no puede encontrar su declaration file es que tengo que instalarlo manualmente.
+
+Para instalarlo ni siquiera tengo que saber el nombre de estos file.Siempre va a ser @types/{library name}. asi pues instalo los archivos de declaración de tipos para faker:
+>npm i @types/faker -D
+
+recuerda que el tipado puede ir en modo dev.
+
+				VIDEO 621 USING TYPE DEFINITION FILES
+
+Uno de los beneficios que tendré al usar los types es que puedo usar CTRL+click en variables,métodos o instancias como 'faker' y ver toda su descripción.
+Seguramente iré a un archivo tipo index.d.ts(la d es de definition)
+Cualquier archivo con extensión .d.ts suele ser un type definition file:
+
+
+declare const fakerStatic: Faker.FakerStatic;
+
+declare namespace Faker {
+    interface FakerStatic {
+        locale: string;
+        setLocale(locale: string): void;
+
+        address: {
+            zipCodeByState(state: string): string;
+            zipCode(format?: string): string;
+            city(format?: string): string;
+            cityName(): string;
+
+Alli podré ver que por ejemplo cityName es una función que devuelve un string(esto es importante ya que latitude():string y longitude:():string también lo hacen y uo quiero Numbers).Esto no lo hubiera podido ver tan fácil sin los @types.
+
+No sólo esto,sino que si analizo la propiedad name veré la función firstName que puede recibir un argumento gender opcional de tipo number.Esto ni siquiera aparece en su documentación de npm.Los types tienen la mejor documentación,la más actual :
+name: {
+  firstName(gender?:number):string;
+
+NOTA: cuando tengo una propiedad que es un objeto al crear una instancia esta propiedad no crea ese sub-objeto directamente:
+
+export class User {
+  name: string;
+  location:{  <- propiedad location de tipo object
+    lat: number,
+    lng: number
+  };
+  constructor(){
+    this.name = faker.name.firstName();
+    this.location.lat <- dará error cannot access property 'lat' of undefined
+    };
+  }
+
+SOMOS NOSOTROS LOS RESPONSABLES DE INICIALIZAR la propiedad de tipo Object  
+  this.location = {
+      lat: Number(faker.address.latitude()),
+      lng: Number(faker.address.longitude())
+      }
+    };
+NOTA:Number y el unary operator '+' hacen lo mismo:
+Number('45.45') <- 45.45 as number
++'45.45' <- 45.45 lo mismo
+
+					VIDEO 622 EXPORT STATEMENT IN TYPESCRIPT
+
+NOrmalmente en el archivo donde declare una clase no tendré más código adicional,asi que hay que exportar esa clase para usarla en otro archivo.
+
+export class User {
+  name: string;
+
+Despues hay que importarla en cualquier file:
+
+import { User } from "./User"; <- fijate que no es una export default
+EN TS normalmente no se usan las export default,aunque si existen:
+
+export default 'red'; <- puedo exportar un valor por defecto.
+Sin embargo la convención es no usar nunca export default.Asi siempre que importe algo tendré que usar {  } siempre,siendo más lógico y claro.
+Esta regla no se usa para imports de módulos npm,ya que no depende de mi.
+
+Con esto en mente exporto la clase y la importo en el index.ts:
+
+export class User
+
+import { User } from './User';
+const user = new User(); 
+console.log(user) <- recuerda que llamo a faker en el constructor
+
+NOTA:hubo que usar type="module" e importar faker/locale/en_US
+
+				VIDEO 623 DEFINING A COMPANY
+
+De nuevo ojo con los bugs de esta libreria.Fijate que también de nuevo tengo que iniciar el objeto en el constructor y parsear el string.
+
+import faker from 'faker/locale/en_US';
+
+export class Company {
+  companyName: string;
+  catchPhrase: string;
+  location: {
+    lat: number;
+    lng: number;
+  };
+  
+  constructor() {
+    this.companyName = faker.company.companyName();
+    this.catchPhrase = faker.company.catchPhrase();
+    this.location = {
+      lat: parseFloat(faker.address.latitude()),
+      lng: parseFloat(faker.address.longitude())
+    };
+  }
+}
+
+					VIDEO 625 ADDING GOOGLE MAPS
+
+Para usar GoogleMaps tengo que habilitar el billing en mi cuenta de Google Developer.Si no quiero hacer esto puedo usar esta pre-generated key:
+AIzaSyBNLrJhOMz6idD05pzfn5lhA-TAw-mAZCU
+
+Se pone en una etiqueta script:
+<script src="https://maps.googleapis.com/maps/api/js?key=..."></script>
+
+Si bien se pueden usar módulos npm usar esta forma es,de lejos,la forma más fácil
+
+NOTA: lo que instalamos es la maps Javascript API de Google
+Si he metido bien la key podré ver en 'network' un status de 200
+Sin embargo,la prueba definitiva es tipear 'google' en la consola.Deberé ver el bojeto entero:
+
+<google
+>{maps: {…}}
+
+			VIDEO 627 GOOGLE MAPS INTEGRATION WITH TYPESCRIPT
+
+NOTA. la libreria para los types definition files que usa Stephen ha sido deprecada(era @types/googlemaps.En su lugar ahora lleva un punto:
+>npm install @types/google.maps
+
+Adicionalmente,veré este error:
+Cannot find name 'google'.ts(2304)
+
+Para corregir esto se usa una tripe slash directive en la primera linea del index.ts:
+/// <reference types="@types/google.maps" />
+
+IMPORTANTE: normalmente instalo módulos de npm.Pero esta vez he usado un script.Este script va a ser añadido en mi proyecto como una variable global.Es por esto que pude tipear en la consola de las DevTools 'google' y veia la info.
+Sin embargo,si voy al IDE y tipeo 'google' no veré la ayuda.Necesito los type definition files.
+NOTA:puedo usar los type definition files no sólo para módulos npm,sino para etiquetas script añadidas directamente en mi index.html(fijate que ajax,jquery,..muchos usan tags <script>)
+Asi pues instalo el módulo:
+>npm i @types/
+
+NOTA:las tripe slash directives son comentarios mono-linea conteniendo una única XML tag.El contenido de esa tag se usa como una compiler directive.Es decir que su contenido se usa en la compilación
+/// <reference types="@types/google.maps" />
+
+Ahora debería poder tipear google y ver en el onHOver que me redirecciona a namespace google.Ya tengo el tipado.Lo siguiente va a ser mostrar el mapa.
+
+			VIDEO 628 EXPLORING TYPE DEFINITION FILES
