@@ -7,7 +7,9 @@ import { Order } from '../../models/Order';
 import { OrderStatus } from '@oscargmk8s/common';
 import { stripe } from '../../stripe';
 import { Payment } from '../../models/Payment';
+import { natsWrapper } from '../../nats-wrapper';
 
+jest.mock('../../nats-wrapper');
 // jest.mock('../../stripe');
 
 describe('Testing payments Microservice', () => {
