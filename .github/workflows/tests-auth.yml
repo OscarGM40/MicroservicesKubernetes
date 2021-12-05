@@ -1,5 +1,5 @@
 # lo pirmero es dar un name a este workflow/a esta acción
-name: tests
+name: tests-auth
 
 # On determina cuando ejecutar el script
 on:
