@@ -494,7 +494,42 @@ En los próximos videos vamos a ver como ejecutar todos los tests de nuestro pro
 
 				VIDEO 496 RUNNING TESTS IN PARALLEL
 
+Hay dos formas de agregar el resto de tests a la GitHub Action.Una es muy obvia y sería seguir contatenando steps:
 
+jobs:
+  build: 
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd auth && npm install && npm run test:ci
+* Ahora sería otra run que me cambie a otro srv,etc...Sin embargo esto ejecutaría los test uno detrás de otro,en serie o secuencialmente.
+No queremos esto,pues estaría varios minutos esperando.Puedo crear más workflows que también se ejecuten en cada pull_request(segunda forma).
 
+Lo primero será cambiar el nombre de este workflow y del file,ya que se llama tests.yml:
+name: tests-auth <- cambio el nombre del file a tests-auth.yml
+on: ... 
 
+Fijate que los microservicios con testing son auth,orders,tickets y payments:
 
+# Voy creando todos los files.Fijate que son en plural 
+name: tests-orders
+
+# On determina cuando ejecutar el script
+on:
+  pull_request
+
+# jobs determina que tareas realizar
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd orders && npm install && npm run test:ci
+
+NOTA: if a workflow stalles out I can cancell it clicking on details and then on 'cancel workflow'.Be sure workflow is stalled out for some minutes before cancelling.
+En teoría ahora debería hacer el merge con el PR,y como la master cambiará,disparar otra acción(un redeploy).Sin embargo hay que configurar esto.
+
+				VIDEO 498 SELECTIVE TEST EXECUTION
+
+En teoría tenemos todos los servicios aislados,con lo que un cambio en 'auth' no debería romper nada en payments u orders,asi que,¿para qué ejecutar sus tests si estamos seguros que funcionan?
+Podemos configurar esto haciendo un pequeño cambio a los test.yaml.
