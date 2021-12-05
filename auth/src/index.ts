@@ -19,7 +19,7 @@ const start = async () => {
       useCreateIndex: true,
     });
     console.log(`Connected to database ${mongoose.connection.name}`);
-    console.log('added branch dev')
+    console.log('learning GitHub Actions...')
   } catch (error) {
     console.error(error);
   }
