@@ -533,3 +533,30 @@ En teoría ahora debería hacer el merge con el PR,y como la master cambiará,di
 
 En teoría tenemos todos los servicios aislados,con lo que un cambio en 'auth' no debería romper nada en payments u orders,asi que,¿para qué ejecutar sus tests si estamos seguros que funcionan?
 Podemos configurar esto haciendo un pequeño cambio a los test.yaml.
+Fijate que tuve que pullear el master remoto para abrir los archivos en el IDE
+
+Realmente es muy sencillo,solo tengo que pasar un argumento 'paths' al pull_request condicionando la ruta de los archivos que cambien(fijate que puedo pasar ramas)
+
+on:
+  pull_request:
+    paths:
+      - 'auth/**' <- solo si cambiar cualquier archivo dentro de auth/
+
+Increible.Puedo pasarle archivos en concreto o ramas.Repito el proceso para los otros tres servicios con testing.
+
+					VIDEO 499 DEPLOYMENT OPTIONS
+
+En cuanto a Providers Stephen analiza 4.Tanto AWS como GCP cobran 10 centimos por hora por tener un control node en kubernetes(lo que dispara el precio a ~120$ al mes).Azure cobra unos 70$ y Digital Ocean es la mejor opcion.
+
+I just want to share this link with you it gives you a free 100$ DO credit you can use for 60 days.
+
+https://m.do.co/c/50b8bebb68f1
+
+				VIDEO 500 CREATING A HOSTED CLUSTER
+
+Stephen recomienda al menos tres nodos(master+2slaves??)Adicionalmente habrá que contratar un balanceador de carga.También hay que darle un nombre al cluster,etc.
+En mi caso instalaré todo en Hetzner,en dos máquinas.
+
+			VIDEO 501 REMINDER ON KUBERNETES CONTEXT
+
+Una vez tenga el cluster hay que conectar kubectl con ese cluster.
