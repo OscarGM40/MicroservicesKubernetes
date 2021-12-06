@@ -3,7 +3,9 @@ name: tests-tickets
 
 # On determina cuando ejecutar el script
 on:
-  pull_request
+  pull_request:
+    paths:
+      - 'tickets/**'
 
 # jobs determina que tareas realizar
 jobs:
