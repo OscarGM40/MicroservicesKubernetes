@@ -555,8 +555,160 @@ https://m.do.co/c/50b8bebb68f1
 				VIDEO 500 CREATING A HOSTED CLUSTER
 
 Stephen recomienda al menos tres nodos(master+2slaves??)Adicionalmente habrá que contratar un balanceador de carga.También hay que darle un nombre al cluster,etc.
-En mi caso instalaré todo en Hetzner,en dos máquinas.
+En mi caso instalaré todo en Hetzner,en dos máquinas.Parece que cobran por el balanceador,asi que tomaré la oferta inicial y haré un primer deploy con Digital Ocean de dos meses.
+NOTA:en cuanto cree el cluster me empezarán a cobrar.Debo asegurarme que lo termino antes de que se acabe la promoción.Asi pues doy en crear cluster,selecciono versión y región.Eligo 3 nodos(master+2 workers).Es buena idea renombrar el cluster a un nombre lógico en vez de un hash.
+Más adelante crearemos una GitHub pipeline para hacer el deploy a este cluster.
 
 			VIDEO 501 REMINDER ON KUBERNETES CONTEXT
 
-Una vez tenga el cluster hay que conectar kubectl con ese cluster.
+Una vez tenga el cluster hay que conectar kubectl con ese cluster.Como recordatorio kubectl puede conectarse a cualquier cluster cambiandole el contexto.
+Asi que vamos a crear un segundo contexto usando la Digital Ocean CLI(se llama doctl de digital ocean controller).
+La doc está en este repo: https://github.com/digitalocean/doctl
+PUedo usar snap o este oneliner:
+curl -sL https://github.com/digitalocean/doctl/releases/download/v<version>/doctl-<version>-linux-amd64.tar.gz | tar -xzv
+Version 1.67.0
+IMPORTANTE:falta moverlo => sudo mv ~/doctl /usr/local/bin
+
+NOTA:lo dejo en /home/oscar el ejecutable(no,debo moverlo)
+
+Compruebo que tengo visión sobre doctl.Una vez me dé alguna salida debo autenticarme.Pero necesitaré un token.Puedo generar uno en el dashboard en la sección API:
+En cuanto lo tenga ejecuto el comando y pego el tokenn
+>doctl auth init
+
+oscar@acer-linux:~$ doctl auth init
+Please authenticate doctl for use with your DigitalOcean account. You can generate a token in the control panel at https://cloud.digitalocean.com/account/api/tokens
+
+Enter your access token: 
+Validating token... OK
+
+NOTA: tmb vale doctl auth init --access-token <myToken> y para w10 usar choco:
+choco install doctl para Mac brew install doctl
+
+Una vez autenticado ya podemos instalar un nuevo contexto para conectar el cluster remoto con mi kubectl local.
+NOTA:fijate que podría crear cuentas truchas en DO o GCP para la promocion inicial si quiero tener el cluster visible para posibles empleadores.Mirar si puedo solucionarlo atemporalemente con sólo el balanceador en Hetzner.
+
+				VIDEO 502 REMINDER ON SWAPPING CONTEXTS
+
+Comandos útiles:
+Autenticarse:
+doctl auth init
+
+Get connection info for our new cluster
+doctl kubernetes cluster kubeconfig save <cluster_name>(para ver el nombre del cluster en el dashboard)
+NOTA:esto también fija el contexto
+
+List all contexts:
+kubectl config view
+NOTA:lo que me interesa es ver el name de cada context para swapear
+
+Use a diferent context:
+kubectl config use-context <context_name>
+
+Ver el contexto actual:
+kubectl config current-context
+
+Asi que creo el nuevo contexto.Esto es vital para poder ver los pods,services,deplys,...Cada vez que cree un cluster debo meter su contexto en el kubectl para poder cambiar a él.
+NOTA:recuerda que el master necesita más máquina que un worker.
+
+De nuevo,no vamos a deployar nada por nosotros mismos,entrando por CLI al cluster,usaremos el workflow de Git.
+
+				VIDEO 503 THE DEPLOYMENT PLAN
+
+Vamos a usar 7 workflows(files) diferentes.Cuando cambie algo en alguno de ellos  se construirá una nueva imagen,se pusheará a Docker Hub y se Updateará el deployment.
+Lógicamente cada workflow corresponde a un microservicio o folder.Ver imagen.
+La razón de separarlo en 7 workflows es que si sólo hay cambios en un microservicio no se toque nada de lo ya existente en los otros 6.De esta forma podría reescribir un microservicio entero en otro lenguaje sin afectar al resto.
+
+NOTA:hay un workflow para la carpeta infra que siempre es ejecutado en cada cambio asi que minimo se ejecutarás dos workflows en cada cambio.
+
+		VIDEO 504 BUILDING AN IMAGE IN A GITHUB ACTION
+
+Voy a workflows y creo uno nuevo from scratch.Usaremos la sintaxis deploy-service.yaml.
+IMPORTANTE es entender cuando se va a ejecutar este job,ya que cada vez que se haga el merge de un PR va a contar como un push:
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'auth/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd auth && docker build -t oscargm40/auth-ticketing-k8s .
+
+NOTA: no hace falta el cd auth.Puedo sustituir el . por auth:
+- run: docker build -t oscargm40/auth-ticketing-k8s auth
+
+IMPORTANTE:recuerda que para pushear una imagen a Docker Hub tengo que estar loggeado y estoy en un ubuntu que no es mío,sin loggear.
+Claro que no voy a pasar mi username y password en el comando,sino que voy a crear un Secret en el repositorio
+
+NOTA:en Settings/Secrets en cada repositorio puedo guardar pares de clave-valor encriptados. Los llamaremos DOCKER_USERNAME y DOCKER_PASSWORD.Al crearlos tendré acceso desde el script.Sin embargo no se importan sólo desde los secrets(tengo que usar env manualmente e importarlos yo)
+
+*Esto es un único comando,ojo
+- run: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+  env:
+    DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+    DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }} 
+
+NOTA: si tengo fallo puedo usar la stdin:
+run:
+ echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USERNAME --password-stdin
+* Lógicamente,ya estaré autenticado asi que hago el push en otro run:
+  -run: docker push oscargm40/auth-ticketing-k8s
+
+En el siguiente video comprobaremos que realmente se haga el rebuild
+
+				VIDEO 505 TESTING THE IMAGE BUILD
+
+Para testear esto simplemente mergeo la PR que tengo.Recuerda que mergear dispara el push sobre la master,asi que cumplirá los requisitos y hará el build.
+En mi caso no he tenido problemas pero puede haber problemas de permisos,etc.
+Fijate que aún nos queda decirle al cluster que use esta última nueva imagen y a infra que ejecute de nuevo todos los yaml(yo diría que ya lo tengo bien con latest en cada image con lo que un rebuild la montará).
+
+				VIDEO 506 RESTARTING THE DEPLOYMENT
+
+
+ACTUALIZACIONES.
+1- La API version del Ingress Controller ha cambiado.Ahora pide el pathType y alguna cosa más.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-srv
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: posts.com
+      http:
+        paths:
+          - path: /posts
+            pathType: Prefix
+            backend:
+              service:
+                name: posts-clusterip-srv
+                port:
+                  number: 4000
+
+2- Desde node 15 las UnhandledPromises dan error y no un Warning.Puedo usar FROM: node16-alpine para usar la LTS de node16
+
+3- Ha dejado los diagramas en un zip para poder verlos
+
+4- Docker viene ahor con buildkit activado por defecto:
+If you wish to disable the Buildkit feature so that you can more accurately follow along with the course, do the following:
+
+Click the Docker Icon your systray
+Select "Preferences"
+Select "Docker Engine"
+Change buildkit from true to false
+
+{
+  "features": {
+    "buildkit": false
+  },
+  "experimental": false
+}
+Apply and Restart.
+
+
