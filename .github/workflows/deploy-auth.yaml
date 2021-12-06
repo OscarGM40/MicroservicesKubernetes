@@ -1,0 +1,31 @@
+# Nombre de la workflow 
+name: deploy-auth
+
+# mergear una PR cuenta como un push
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [ master ]
+    paths: 
+      - 'auth/**'
+
+# Un workflow consta de uno o varios jobs que pueden ejecutarse secuencial o en paralelo
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # Github Actions me permite acceder a contenedores que ellos proveen,esto es un contenedor linux-ubuntu que me prestan.Podria pedir un node,etc..
+    # IMPORTANTE: este contenedor ubuntu-latest viene con Docker preinstalado
+    runs-on: ubuntu-latest
+    # Steps represent a sequence of tasks that will be executed as part of the job.el primero es obvio y es obtener el código del repo
+    steps:
+      # este paso siempre será el primero,claro,pues hace un GET ALL de todo este repositorio
+      - uses: actions/checkout@v2
+      # Runs a single command using the runners shell
+      - name: Run a one-line script
+        run: echo Starting the job
+      # no tengo porque darle un name al run
+      - run: cd auth && docker build -t oscargm40/auth-ticketing-k8s .
+      - run: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
