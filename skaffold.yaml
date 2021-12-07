@@ -21,7 +21,7 @@ build:
         manual:
           - src: 'src/**/*.ts'
             dest: .
-    #- image: us.gcr.io/ticketing-dev-313817/client #
+    #- image: us.gcr.io/ticketing-dev-313817/client # image para GCP
     - image: oscargm40/client-ticketing-k8s 
       context: client 
       docker:
