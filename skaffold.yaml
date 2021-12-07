@@ -4,6 +4,7 @@ deploy:
   kubectl:
     manifests: 
       - ./infra/k8s/*
+      - ./infra/k8s-dev/*
 build:      
   local:
     push: true # cambiar cuando deje de usar GC
@@ -20,8 +21,8 @@ build:
         manual:
           - src: 'src/**/*.ts'
             dest: .
-    #- image: us.gcr.io/ticketing-dev-313817/client #
-    - image: oscargm40/client-ticketing-k8s # falta hacer el build & push al register
+    #- image: us.gcr.io/ticketing-dev-313817/client # image para GCP
+    - image: oscargm40/client-ticketing-k8s 
       context: client 
       docker:
         dockerfile: Dockerfile
@@ -29,7 +30,6 @@ build:
         manual: 
           - src: '**/*.js'
             dest: .
-    #- image: us.gcr.io/ticketing-dev-313817/tickets #
     - image: oscargm40/tickets-ticketing-k8s
       context: tickets
       docker:

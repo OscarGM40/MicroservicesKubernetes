@@ -668,6 +668,126 @@ Fijate que aún nos queda decirle al cluster que use esta última nueva imagen y
 
 				VIDEO 506 RESTARTING THE DEPLOYMENT
 
+Ahora tengo que acceder al cluster,y decirle al Deployment responsable de este Pod que use esta nueva imagen,pero,¿como accedo al cluster de DO?.
+Fijate que estoy en un GitHub container(al usar las Github Actions).Lo que vamos a hacer es instalar doctl,autenticarnos con una API key(usando un secret tal como acabamos de hacer).Fetchearemos el context y se lo pasaremos a kubectl.
+NOTA: kubectl viene preinstalado en un Github container
+
+ASi que al file anterior(deploy-auth.yaml) le agrego al final:
+  - uses: digitalocean/action-doct@v2
+    with:
+      token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} <- recuerda los spaces
+
+El token va a ser un secret que llamaremos DIGITALOCEAN_ACCESS_TOKEN,para generarlo voy al dashboard en API y lo genero(le llamaremos algo semántico también allí,como github_access_token)
+
+De forma similar a como he hecho en mi consola vamos a usar doctl para coger el contexto y pasarselo al kubectl de ese ubuntu :
+  - run: doctl kubernetes cluster kubeconfig save <clusterName>
+
+* Recuerda que el comando coge el contexto y lo pone como el current-context también,luego ya estoy con el kubectl del Github container apuntando a mi cluster:
+  - run: kubectl rollout restart deployment <deployName>
+
+El nombre lo puedo ver en el yaml del infra folder:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-depl
+
+En este caso es 'auth-depl'.Por último,hago el commit del file del workflow y sería genial testear ya esto,sin embargo aún no hemos configurado nada en el cluster,no estamos ejecutando nada.Nos falta aplicar el folder 'infra' con un segundo workflow.
+Tongue tie phrase: trabalenguas
+
+				VIDEO 507 APPLING KUBERNETES MANIFEST
+
+Este segundo workflow va a tratar sobre aplicar todos esos config files del folder infra y aplicarlos en el cluster.Va a ser pretty straightforward y muy parecido al primero asi que copio y pego todo en un nuevo file que llamaremos deploy-manifests.yaml
+NOTA:todos estos config files se les llama manifest.
+
+* Realmente será bastante sencillo
+name: deploy-manifest
+
+on:
+  push:
+    branches: [ master ]
+    paths: 
+      - 'infra/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - run: doctl kubernetes cluster kubeconfig save ticketing-cluster
+      - run: kubectl apply -f infra/k8s
+
+Realmente esto ha sido sencillo.Sin embargo,ahora tenemos un problema.Nuestro Ingress Controller está apuntando a ticketing.dev y este dominio sólo existe en mi Sistema Operativo.Recuerda que el dominio apunta a mi minikube:
+192.168.49.2 posts.com ticketing.dev
+
+Este dominio dependerá de si estoy en producción o desarrollo.En resumen,el ingress-srv.yaml que tenemos no nos sirve tal como está.
+Hay un par de formas de arreglar esto.
+
+				VIDEO 508 PROD VS DEV MANIFEST FILES
+
+La primera solución es bastante sencilla.Para arreglar esto creo dos folders extra en infra llamados k8s-prod y k8s-dev(además del que tenemos).
+
+1- En el original k8s voy a dejar todos los config files que sean iguales tanto para un entorno de producción como de desarrollo,es decir,que les dé igual donde está el cluster
+
+2- En el k8s-dev voy a dejar sólo los config files que vaya a usar en un ambiente de desarrollo,esto es,en un cluster local.
+
+3- En el k8s-prod irán los de sólo producción,lógicamente.
+
+Asi pues,muevo el ingress-srv.yaml a k8s-dev y creo otro con el mismo nombre en prod también.De momento no tengo el dominio pero aqui irá ese dominio
+
+DAdo que he cambiado ingress-srv.yaml de zona tengo que cambiar el archivo de configuración de skaffold pues hemos roto la app.Nada más sencillo:
+
+apiVersion: skaffold/v2alpha3
+kind: Config
+deploy:
+  kubectl:
+    manifests: 
+      - ./infra/k8s/*
+      - ./infra/k8s-dev/* <- agregamos la nueva carpeta a manifests.
+
+TAmbién tengo que cambiar el workflow deploy-manifests.yaml de forma similar:
+- run: kubectl apply -f infra/k8s && kubectl apply -f infra/k8s-prod <- Stephen comenta que es posible que apply -f pueda usar varios directorios como argumentos,pero mejor duplicamos el comando
+
+NOTA: recordar que el cluster necesitará la creación de un par de secrets manualmente.Además del dominio.
+
+					VIDEO 509 MANUAL SECRET CREATION
+
+TEngo que crear dos secrets,el segundo es la private key de stripe.Habrá que asegurarse antes de a qué context apunto!
+
+El primero puedo reasignarle el valor,el segundo es la secret key
+# k create secret generic jwt-secret --from-literal=JWT_KEY=kubernetes
+# k create secret generic stripe-secret --from-literal=STRIPE_KEY=...
+
+Esto es algo que tengo que hacer en cada cluster que use esta aplicación.
+
+				VIDEO 510 DON'T FORGET INGRESS-NGINX
+
+DEbo recordar que tengo que crear un ingress en el cluster.Dependiendo del provider va a cambiar(AWS,DO,mikrok8s,minikube,...)
+
+De momento tengo que usar el de DO:
+https://kubernetes.github.io/ingress-nginx/deploy/#digital-ocean
+
+TEngo que ver que crea el namespace,etc:
+
+namespace/ingress-nginx created
+serviceaccount/ingress-nginx created
+configmap/ingress-nginx-controller created
+clusterrole.rbac.authorization.k8s.io/ingress-nginx created
+
+Y ahora debería poder ver algun pod,etc... aunque puede que tengan fallos.Lo arreglaremos en los siguientes videos.
+
+				VIDEO 511 TESTING AUTOMATED DEPLOYMENT
+
+Vamos a testear lo que hemos echo hasta ahora.Me cambio a dev y hago algun pequeño cambio,lo pusheo y desde Github hago una PR.Esto debería levantar los tests,recuerda,y cuando pasen acepto el merge.
+Todo debería ir correcto.
+
+				VIDEO 512 ADDITIONAL DEPLOY FILES
+
+
+
+
 
 ACTUALIZACIONES.
 1- La API version del Ingress Controller ha cambiado.Ahora pide el pathType y alguna cosa más.
