@@ -960,4 +960,114 @@ export class CustomMap {
 Para llamarla simplemente la importo y la instancio:
 new CustomMap('map');
 Algo tan sencillo protege la libreria entera de malos usos
-NOTA.puedo usar FROM node:16-alpine pero recuerda que las UnhandledPromises ya no dan un warning sino un Error.Docker también ha cambiado
+
+						VIDEO 631 ADDING MARKERS
+
+Vamos a empezar primero escribiendo mal el código.Después usaremos interfaces y por ello un código más reusable.
+NOTA: en TS las clases tienen un comportamiento dual.Puedo usar una clase para crear una instancia de un objeto,pero también puedo usar una clase(o una variable que se refiere a una clase) para referirme a ese tipo también:
+
+import { User } from './User'; <- esto es una variable que se refiere a una clase,puedo crear una instancia o usarla para tipar.
+Hay otras cosas en TS que tienen este comportamiento de poder usarsesimultáneamente como valor o para tipar.
+
+addUserMarker(user:User):void {
+  
+
+addCompanyMarker(company:Company):void {
+
+NOTA: debo acostumbrarme a leeer esos .d.ts.Podré ver cosas tan interesantes como:
+ class Marker extends google.maps.MVCObject {
+    constructor(opts?: google.maps.MarkerOptions|null);
+    /**
+De aqui puedo sacar que al crear un Marker puedo pasar un arg opcional de tipo MarkerOptions.De nuevo si voy a esa interfaz veré nicelly commented all properties of it.
+Entre ellas veré esta:
+ * Map on which to display Marker. The map is required to display the marker
+     * and can be provided with {@link google.maps.Marker.setMap} if not
+     * provided at marker construction.
+     */
+    map?: google.maps.Map|null|google.maps.StreetViewPanorama;
+Aunque es opcional,es otra que en realidad no lo es,pues si creo un Marker tiene que saber en qué mapa debe nacer.
+Y de nuevo veré que también necesita una position. 
+
+Bien,volviendo al código que vamos a crear mal.Seguramente nuestra primera idea sería algo como esto:
+   
+ addUserMarker(user:User):void {
+        new google.maps.Marker({
+            map: this.googleMap,
+            position: {
+                lat: user.location.lat,
+                lng: user.location.lng
+            }
+        })
+    }
+
+
+    addCompanyMarker(company:Company):void {
+        new google.maps.Marker({
+            map: this.googleMap,
+            position: {
+                lat: company.location.lat,
+                lng: company.location.lng
+            }
+        })
+    }
+
+Bien,es obvio que los dos métodos son iguales! XD
+
+				VIDEO 633 ONE POSSIBLE SOLUTION
+
+En este video vamos a ver un approach que parece bueno pero tiene otra downside.Despues refactorizaremos a la solución correcta final.
+
+SOLUCIÓN UNO:
+    addMarker(mappable: User | Company ):void {
+        new google.maps.Marker({
+            map: this.googleMap,
+            position: {
+                lat: mappable.location.lat,
+                lng: mappable.location.lng
+            }
+        })
+    }   
+Si bien pudiera parecer que es correcta no lo es.Typescript por detrás va a coger ambas clases y va a comparar propiedades.Va a rechazar las que sólo sean de una de las dos,limitandome el uso.Dado que User y Company tienen 'map' y 'position' está bien,pero no podré usar catchPhrase de una Company pues User no la tiene.Este es un downside.Sin embargo es aún mas grave la falta de reusabilidad y escalado,que pasa si quiero agregar una tercera clase que puede crear un Marker?
+
+Tendría que volver al método y agregar otro |.Definitivamente no es un buen apprach.
+NOTA: es un método con fuerte acoplamiento(tigh coopling)
+
+			VIDEO 634 RESTRICTING ACCESS WITH INTERFACES
+
+Realmente la mejor solución es usar una interface,con reglas de como debe lucir un addMarker Mappable.
+Una interface es como un gatekeeper,un portero que restringe el acceso a un métdo cualquiera.La llamaremos Mappable por semántica.
+
+Fijate en la inversión que ha habido: en vez de que el método tenga que satisfacer a la clase User,Company,Park,Car,... ahora cada clase tiene que satisfacer a la interfaz Mappable para poder trabajar con el método addMarker.El control pasó a la interfaz y se liberó el método.
+
+* Instructions to every other class on how the can be an argument of AddMarker
+interface Mappable {
+  location: {
+    lat: number;
+    lng: number;
+  }
+};
+ASi,si una clase quiere ser argumento de la función tendrá que satisfacer a la función(teniendo que tener como prop un objeto location:{lat:number;lng:number}.
+
+    addMarker(mappable: Mappable): void {
+        new google.maps.Marker({
+            map: this.googleMap,
+            position: {
+                lat: mappable.location.lat,
+                lng: mappable.location.lng
+            }
+        })
+    }
+LA reusabilidad y bajo acoplamiento salta a la vista.
+
+				VIDEO 635 IMPLICIT TYPE CHECKS
+
+ Realmente me podría llevar el código(el file) a otro proyecto.Es muy reusable.La clase está desacoplada totalmente.Puedo implementar este archivo(la clase) donde quiera y no dará problema.
+
+Fijate que poner una interfaz en el medio ha sido una idea genial.REcuerda que las comparaciones que hace TS(¿cumple este arg que me dan con la interfaz Mappable?) ocurren behind the scenes y son automáticas.No hay que hacer nada más.
+IMPORTANTE: A esto se le llama 'IMPLICIT CHECK' o chequeo implícito de tipos. 
+
+				VIDEO 636 SHOWING POPUP WINDOWS
+
+
+
+
