@@ -1,0 +1,27 @@
+# Nombre de la workflow 
+name: deploy-manifests
+
+# mergear una PR cuenta como un push
+on:
+  push:
+    branches: [ master ]
+    paths: 
+      - 'infra/**'
+
+# Un workflow consta de uno o varios jobs que pueden ejecutarse secuencial o en paralelo
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # Github Actions me permite acceder a contenedores que ellos proveen,esto es un contenedor linux-ubuntu que me prestan.Podria pedir un node,etc..
+    # IMPORTANTE: este contenedor ubuntu-latest viene con Docker preinstalado
+    runs-on: ubuntu-latest
+    # Steps represent a sequence of tasks that will be executed as part of the job.el primero es obvio y es obtener el código del repo
+    steps:
+      # este paso siempre será el primero,claro,pues hace un GET ALL de todo este repositorio
+      - uses: actions/checkout@v2
+      # instalo doctl en este Github Container(ya viene con kubectl un GitHub container)
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - run: doctl kubernetes cluster kubeconfig ticketing-cluster
+      - run: kubectl apply -f infra/k8s && kubectl apply -f infra/k8s-prod

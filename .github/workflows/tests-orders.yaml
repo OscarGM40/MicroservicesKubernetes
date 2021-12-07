@@ -3,7 +3,9 @@ name: tests-orders
 
 # On determina cuando ejecutar el script
 on:
-  pull_request
+  pull_request:
+    paths:
+      - 'orders/**'
 
 # jobs determina que tareas realizar
 jobs:

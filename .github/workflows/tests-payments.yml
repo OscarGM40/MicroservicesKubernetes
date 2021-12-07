@@ -3,7 +3,9 @@ name: tests-payments
 
 # On determina cuando ejecutar el script
 on:
-  pull_request
+  pull_request:
+    paths:
+      - 'payments/**'
 
 # jobs determina que tareas realizar
 jobs:
