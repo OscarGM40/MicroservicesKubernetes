@@ -890,3 +890,74 @@ NOTA:las tripe slash directives son comentarios mono-linea conteniendo una únic
 Ahora debería poder tipear google y ver en el onHOver que me redirecciona a namespace google.Ya tengo el tipado.Lo siguiente va a ser mostrar el mapa.
 
 			VIDEO 628 EXPLORING TYPE DEFINITION FILES
+
+Ahora que TS entiende el tipado puedo analizar:
+declare namespace google.maps {
+  export class Map extends...
+Esto significa que habrá una variable global google con una propiedad maps y dentro de ella ya está todo.
+NOTA:para ver mejor un archivo tan grande puedo comprimir su interior.Para ello tipo fold level 2 en el IDE:
+Alli podré ver por ejemplo la clase Marker,la cual usaremos.Puedo observar que saber leer un archivo de documentación es vital.
+
+declare namespace google.maps {
+  export class Map extends MVCObject {...}
+  export interface Padding{...}
+  export class Marker{...}
+
+De aqui debería poder sacar como crear un Map o un Marker y si expando la clase entender que argumentos puedo usar.
+
+Fijate además que el constructor de Map es:
+  constructor(mapDiv:Element|null,opts?:MapOptions)
+De aqui debo sacar que el segundo arg es opcional y el primero es un elemento HTML.Si voy a la interface MapOptions:
+interface MapOptions {
+    /**
+     * Color used for the background of the Map div. This color will be visible
+     * when tiles have not yet loaded as the user pans. This option can only be
+     * set when the map is initialized.
+     */
+    backgroundColor?: string|null;
+    /**
+     * The initial Map center.
+     */
+    center?: google.maps.LatLng|null|google.maps.LatLngLiteral;
+    /**
+     * When <code>false</code>, map icons are not clickable. A map icon
+     * represents a point of interest, also known as a POI. By default map icons
+     * are clickable.
+     */
+Puedo observar como aqui si que me ayudará un montón este file.
+NOTA:la key que proporcionan parece que va bien.
+
+				VIDEO 629 HIDING FUNCTIONALITY
+
+Hagamos un repaso de lo que puedo hacer en este index.ts ahora mismo:
+1º: puedo crear una new Company
+2º: puedo referenciar todas las propiedades de esa company(name,lat,long..)
+3º: puedo crear un User
+4º: puedo referenciar sus props(name,lat,long...)
+5º: tengo acceso a métodos como setZoom,setCenter,puedo crear un Map,un Marker,llamar a setStreetView,panTo,getHeading.
+
+Pero fijate que si llamo a ciertos métodos de la variable global google puedo romper la app.¿Como podria hacer que otros dev no pudieran llamar a ciertos métodos que rompan la app?
+Nos gustaría limitar las acciones que un dev pueda usar en este file a : crear una Company,crear un User, crear un Map y Add a Marker.Es obvio que esto sería ideal,pero como limitamos esta librería?Por defecto viene abierta...
+La solución será crear una CustomMap class que cree un map y tenga acceso a ese addMarker.
+Fijate que es una idea genial,en vez de dejar la libreria abierta a todos.
+
+					VIDEO 630 ¿WHY USE PRIVATE MODIFIERS?
+
+Fijate en la gran mejora que es aislar la librería con esta simple clase:
+export class CustomMap {
+  // el tipo es la clase 
+    private googleMap: google.maps.Map;
+
+    constructor(divId: string) {
+        this.googleMap = new google.maps.Map(document.getElementById(divId), {
+            zoom: 2,
+            center: {
+                lat: 0,
+                lng: 0
+            }
+        });
+    }
+Para llamarla simplemente la importo y la instancio:
+new CustomMap('map');
+Algo tan sencillo protege la libreria entera de malos usos
+NOTA.puedo usar FROM node:16-alpine pero recuerda que las UnhandledPromises ya no dan un warning sino un Error.Docker también ha cambiado
