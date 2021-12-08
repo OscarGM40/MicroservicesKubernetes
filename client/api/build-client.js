@@ -6,9 +6,9 @@ const  presetingAxios = ( { req } ) => {
 
       return axios.create({
          /* forma para local */
-         // baseURL:'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local',
+         baseURL:'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local',
       /* forma para remoto       */
-        baseURL: "http://www.ticketing-k8s-prod.tk",
+      //   baseURL: "http://www.ticketing-k8s-prod.tk",
         headers: req.headers,
       });
    } else {
