@@ -1,0 +1,131 @@
+							DEPLOY EN UN VPS BARE METAL
+
+Voy a tratar de usar un cluster mono-node(ya veré si agrego otro node).En todo caso nunca va a ser un HA cluster.
+Info:https://gabrio-tognozzi.medium.com/kubernetes-single-node-cluster-on-a-5-month-vps-46ce465d067e
+
+NOTA: para usar mikrok8s se necesita snap:
+apt-get install snapd -y
+Despues ya lo instala él(parece que mikrok8s usa containerd y no docker y no se puede cambiar,asi que no tengo que instalarlo):
+snap install microk8s --classic
+
+Si en algún momento quiero empezar de nuevo o borrar todo que lo borre snap y despues borro snap(snap ocupa unos 70MB de RAM,microk8s unos 400MB):
+sudo snap remove microk8s --purge
+
+Traefik es el Ingress-controller(se pueden usar otros,pero este permite generar certificados SSL y renovarlos!)
+
+
+			INSTALAR MIKROk8S, FIJAR ALIASES, COMPROBAR STATUS
+
+De nuevo puedo instalarlo con:
+sudo snap install microk8s --classic
+Y es buena idea crear dos alias
+alias k="microk8s kubectl"
+alias m="microk8s"
+
+# check minikube status
+m status | head -n4
+# look at the deployed resources 
+k get all -A
+
+Puedo crear multiclusters.Para ello ejecuto el siguiente comando que me dará como salida un comando con un token:
+microk8s.add-node
+>join node with:...
+Copio y pego ese comando en otra máquina con mikrok8s instalado(es de un sólo uso
+m k get nodes <- para ver los nodos+
+
+Una vez que arranque el cluster voy a necesitar:
+1. helm3 will be used to install helm charts in our cluster,
+2. RBAC stands for role base access control, and will be used by our ingress controller, and who knows who else
+3. DNS deploys a CoreDNS pod that allows for inter-service communication
+4. Storage allows us to use VolumeClaims and therefore Volumes ( e.g. for the docker-registry to persist pushed images )
+
+Fijate que mikrok8s viene con los addons apagados
+m enable --help < para ver la ayuda
+m enable helm3 rbac dns storage
+
+El autor del artículo comenta que el custer viene con un NGINX ingres-controller integrado,pero no tiene soporte para Let's Encrypt mientras que Traefik si lo tiene
+
+				CONFIGURE THE DOCKER REGISTRY
+
+In this step we will configure the docker registry that we will use to store our images, that will then be used from inside our cluster. Once the docker registry is configured we will be able to use our custom built images for the containers of our deployments, using an image value such as
+image: gabrio.tognozzi.net:5000/image:tag.
+It follows a gist that defines a Service and a StatefulSet resource. The Service is necessary to allow the ingress to reach the docker registry. We will use a StatefulSet instead of a Deployment for our registry because we want the pushed images to be persisted.
+
+NOTA: crear el file docker-registry.yml con este código(ojo con el puerto):
+apiVersion: v1
+kind: Service
+metadata:
+  name: docker-registry
+  labels:
+    app: docker-registry
+spec:
+  ports:
+    - port: 5000
+      name: registry
+  selector:
+    app: docker-registry
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: docker-registry
+spec:
+  serviceName: docker-registry
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-registry
+  template:
+    metadata:
+      labels:
+        app: docker-registry
+    spec:
+      containers:
+      - name: docker-registry
+        image: registry:2
+        env:
+        - name: REGISTRY_AUTH
+          value: htpasswd
+        - name: REGISTRY_AUTH_HTPASSWD_PATH
+          value: /auth/htpasswd
+        - name: REGISTRY_AUTH_HTPASSWD_REALM
+          value: Registry Realm
+        ports:
+        - containerPort: 5000
+          name: web
+        volumeMounts:
+        - name: www
+          mountPath: /var/lib/registry
+        - name: auth
+          mountPath: /auth
+  volumeClaimTemplates:  
+    - metadata:
+      name: www
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 5Gi
+  - metadata:
+      name: auth
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+
+After applying this yaml wait for the pods to start. Once the docker registry has started, reading the logs of the command k logs service/docker-registry you will find a generated password to use with the user docker, for logging in.
+
+If you run docker login form the terminal and complete the login, you will now be able to docker tagand docker push images to the newly configured docker registry. Furthermore, you will find a credential’s file under ~/.docker/config.json, we need this file to create a Secret Kubernetes resource that will be used by the pods to authenticate themselves to the registry and download their images from the it.
+
+Parece que ha creado una imagen del DockerHub:
+      containers:
+      - name: docker-registry
+        image: registry:2
+
+Genial.Falta configurar el secret para autenticarse:
+
+k create secret generic registry-credentials --from-file=.dockerconfigjson=/path/to/.docker/config.json --type=kubernetes.io/dockerconfigjson
+
+
