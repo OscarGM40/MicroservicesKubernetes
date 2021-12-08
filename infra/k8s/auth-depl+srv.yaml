@@ -15,7 +15,7 @@ spec:
       containers:
         - name: auth
           image: oscargm40/auth-ticketing-k8s:latest
-          #image: us.gcr.io/ticketing-dev-313817/... ..
+          #image: us.gcr.io/ticketing-dev-313817/...i ..
           imagePullPolicy: Always  
           env:
             - name: MONGO_URI
