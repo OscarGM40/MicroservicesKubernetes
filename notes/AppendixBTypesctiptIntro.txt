@@ -1068,6 +1068,82 @@ IMPORTANTE: A esto se le llama 'IMPLICIT CHECK' o chequeo implícito de tipos.
 
 				VIDEO 636 SHOWING POPUP WINDOWS
 
+Puedo crear un PopUp Modal que muestre cierta info cuando se haga hover sobre un marker.Se usa la clase InfoWindow({content: contentString}).Aparte hay que crear un listener al marker con markerInstance.addListener('event',()=>{infoWindowInstance.open(map,marker).Sencillo.
 
+addMarker(mappable:Mappable):void {
+  const marker = new google.maps.Marker({
+    map: this.googleMap,
+    position: {
+      lat: mappable.location.lat,
+      lng: mappable.location.lng
+   }
+ })
+  marker.addListener('event', () => {
+    const inforWindow = new google.maps.InfoWindow({
+      content: "Hi there!!"
+    })
+    infoWindow.open(this.googleMap,marker)
+  })
+}
+Todo esto está muy bien,pero mostrar un simple 'Hi there' no le dirá al usuario si el marker es un User o una Company.Sería genial que cada tipo de Marker displays something different
+
+        	VIDEO 637 USING INTERFACE DEFINITIONS
+
+De entre varias cosas que podríamos hacer,hay una muy buena y es hacer responsable al argumento mappable(es decir,a la interfaz guardiana) de tener un método encargado de mostrar el content.
+Fijate que tiene mucho sentido.Asi que la interfaz va a tener un nuevo requirement o regla en forma de method:
+
+interface Mappable {
+  location: {
+    lat:number;
+    lng:number;
+  };
+  markerContent():string;
+}
+
+Desde ahora,la interfaz tendrá un method markerContent que devuelve un String.In order to be able to be chosen as argument las clases deberán desarrollar este método.Amazing.
+
+Cada clase lo puede desarrollar como quiera,lógicamente:
+  markerContent(): string {
+    return `
+      <div>
+        <h1>Company Name: ${this.companyName}</h1>
+        <h3>Catchphrase: ${this.catchPhrase}</h3>
+      </div>
+    `;
+  }
+
+				VIDEO 638 OPTIONAL IMPLEMENTS CLAUSES
+
+Fijate que acabamos de obligar a cada clase que quiera ser un argumento de cierta función a implementar otra cláusula.Hagamos lo mismo con una propiedad color,pues sería buena idea que cada marker pueda ser de un color diferente!
+
+Si añado a la interfaz esta nueva regla,veré en la llamada al método que las clases dan error.Es posible que éste no sea el mejor sitio para mostrar el error,¿cierto?.Vamos a añadir código que mejore este feedback de errores.
+
+Empezamos por exportar la interfaz:
+export interface Mappable {
+ ...
+  }
+La vamos a importar en cada clase.
+import { Mappable } from './CustomMap';
+
+export class User implements Mappable{
+
+En cuanto la implemente veré que el error está en la clase y no en el método,lo cual es mucho mejor,más claro,conciso y lógico.Además que el error y donde corregirlo están juntos.Putos pros :(
+
+NOTA: TS soporta múltiple herencia para interfaces,para clases se pueden usar mixins,pero directamente sólo puede heredar de otra clase(varias interfaces,una clase)
+
+RESUMEN: hacer que una clase herede de una interfaz va a ayudar a TS a que identifique los errores,y va a obligar a la clase a cumplir con lo que dicte la interfaz o interfaces que herede,teniendo que implementar sus propiedades y métodos.
+Puedo observar que una clase que implementa una interfaz va a ayudarme mucho como dev a saber que tengo que desarrollar en ella(y al resto de devs).
+
+				VIDEO 639 APP WRAPUP - QUICKREVIEW
+
+1- Fijate que siempre hemos tratado de limitar y separar lo que se puede hacer en cada archivo.Unos(los de las clases) sólo son para definir,otros como el index solo instancian clases.En cada file SOLO SE PUEDEN HACER LIMITADAS ACCIONES
+Y como resultado de ésto,la clase CustomMap es incluso reutilizable fuera de este proyecto,está totalmente desacoplada.
+Se intenta dejar cada file como una 'black box' donde sólo se pueda hacer lo justo desde cada file.
+
+2- Invertimos el control en el método addMarker,ahora lo tiene el método,gracias a una interfaz, y las clases deben cumplir con ella.Al principio era al revés,el método debía cumplir con las clases,siendo muy mala idea(no escalabilidad,reusabilidad,legibilidad confusa,...).
+Además con la interfaz es muy fácil añadir una nueva regla a cumplir para poder ser un argumento de ese método.
+
+3- Mejoramos el display de los errores sacandolos del método haciendo que TA los muestre en la clase simplemente implementando la interfaz.Fue un paso sencillo pero muy ilustrativo.El que una clase implemente la interfaz hará que deba cumplir con el contrato de ésta directamente ya en la clase,centralizando los errores al mejor lugar donde pueden estar.
+La herencia de interfaces es algo que debo dominar.Estas son los tres aspectos generales que hicieron mejorar el código.
 
 
