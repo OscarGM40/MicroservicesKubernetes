@@ -785,8 +785,162 @@ Todo debería ir correcto.
 
 				VIDEO 512 ADDITIONAL DEPLOY FILES
 
+Fijate que vamos a crear el resto de files,pero la interfaz de Github no es muy amigable.Mejor hacerlo en el IDE.Una vez completado no debería de ver los re-deploys pues nada cambió en esos directorios.Asi que haremos una PR y algunos cambios.
 
+				VIDEO 513 A SUCCESSFULL DEPLOY!	
 
+IMPORTANTE!!: Fijate como he hecho cambios en una rama y me muevo a otra para commitear desde alli.Esto me confirma que puedo hacer cambios donde quiera y cambiarme a otra rama antes de hacer el commit.
+Asi pues hago cambios,me cambio a la rama dev antes de hacer el commit,y commiteo y pusheo.Creo una PR y esto debería tirar tanto los tests como los deploys.
+
+NOTA:si fallará puedo debugear con describe o los logs:
+k describe pod <podId>
+k logs <podId>
+
+				VIDEO 514 GETTING A DOMAIN NAME
+
+Fijate que se me creó un Load Balancer automáticamente(en realidad lo hizo el Ingress Controller,cuando se creó él,también creó el Balancer).
+
+Este Balanceador está dirigiendo el tráfico a mi cluster.Y DigitalOcean le habrá dado una IP.Podría visitar esa IP y debería ver un error de Nginx(confirmando que es el Ingress Nginx el que está respondiendo)
+
+El siguiente paso es obvio y es crear/comprar un dominio que apunte a esta IP(la del balanceador)
+Puedo usar cualquier Domain Name Provider(Stephen usará Namecheap.com).También aclara que cuanto más largo el dominio más barato suele ser.
+
+					VIDEO 515 THREE IMPORTANT NOTES
+
+En el siguiente video configuraremos nuestro proyecto para que use el nuevo dominio.Hay 3 grandes cambios que tengo que hacer:
+
+1- Actualizar la baseURL en el cliente(en api/build-client.js,el helper).Ya no puedo apuntar al ingress-nginx:
+
+From this:
+    return axios.create({
+      baseURL: 'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local',
+      headers: req.headers,
+    });
+to:
+    return axios.create({
+      baseURL: 'Whatever_your_purchased_domain_is',
+      headers: req.headers,
+    });
+
+Ejemplo:  baseURL: 'http://www.ticketing-app-prod.xyz/'
+
+2- Desactivar HTTPS CHECKING: nosotros configuramos todos los servicios para que usarán cookies sólo sobre HTTPS.Esto puede romper el deploy ya que la primera vez no tendremos el HTTPS configurado.
+Esto estaba en el app.ts de los services auth,orders,tickets y payments.
+En el middleware cookie-session tengo que cambiar:
+
+From:
+  cookieSession({
+    signed: false,
+    secure: process.env.NODE_ENV !== 'test',
+  })
+to:
+
+  cookieSession({
+    signed: false,
+    secure: false,
+  })
+
+3- Añadir el Load BAlancer: Hay un bud con los LB de DO.Stephen provee un link a un artículo.Para arreglarlo,debo añadir esto al final del ingress-srv.yaml(concatenarlo.También debo actualizar al principio la URL en 'annotations'.
+Vista final del archivo:
+
+codigo anterior...
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.beta.kubernetes.io/do-loadbalancer-enable-proxy-protocol: 'true'
+    service.beta.kubernetes.io/do-loadbalancer-hostname: 'www.ticketing-app-prod.xyz'
+  labels:
+    helm.sh/chart: ingress-nginx-2.0.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/version: 0.32.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: https
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/component: controller
+
+				VIDEO 516 CONFIGURING THE DOMAIN NAME
+
+TEngo que cambiar los nameservers del Domain Name Provider a ns1.digitalocean.com ns2.digitalocean.com y ns3.digitalocean.com.
+Ahora voy al dashboard de DO y en Networking/Domain inserto el nombre del dominio
+
+Una vez inserte el dominio puedo configurar un par de cosas(como redireccionarlo al LB,asinto).
+Crearé un record tipo A que redirecciona al LB(con @ como texto)
+También otro CNAME con www is an alias of @ 
+A ambos les bajo el TTL a 30
+
+Por último también tengo que cambiar el ingress.yaml de prod:
+spec:    
+  rules:
+    - host: www.ticketing-k8s-prod.tk <- ya no puede apuntar a ticketing.dev el de producción.
+
+Con todo terminado hago el commit y push desde dev y creo otra PR en GitHub.
+
+			VIDEO 518 DESTRUIR TODO Y POSIBLES PASOS
+
+Recuerda que debo destruir todo,tanto el LB como el cluster.
+Tengo la opción de 'destroy' o 'remove' en more
+
+Mientras tenga la app podría expandirla con estos pasos
+
+1- Añadir HTTPS : puedo ir a cert-manager.io donde podré añadir un certificado a un cluster de kubernetes fácilmente(la documentación es un poco confusa).
+
+2- Añadir un nuevo microservicio para Email Support: debería enviar un email al usuario cada vez que realice un pago.Puedo crear un nuevo srv que use Mailchimp | Sendgrid,...
+
+3- Y más... ver video.
+
+						EXTRAS COMO CREAR PVCS
+
+Puedo crear un volumen de forma fácil para cualquier servicio.Debo agregar en cada srv para Mongo:
+
+Cambiar esto:
+
+  spec:
+      containers:
+        - name: auth-mongo
+          image: mongo:4.2.1
+
+por:
+
+  spec:
+      containers:
+        - name: auth-mongo
+          image: mongo
+      volumes:
+        - name: mongodb-storage
+          persistentVolumeClaim:
+            claimName: mongodb-pv-claim
+
+Y habrá que crear ese PVC con ese nombre(abajo del todo):
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pv-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
 
 
 ACTUALIZACIONES.
@@ -830,5 +984,4 @@ Change buildkit from true to false
   "experimental": false
 }
 Apply and Restart.
-
 
