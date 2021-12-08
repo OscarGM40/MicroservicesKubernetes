@@ -4,11 +4,11 @@ const  presetingAxios = ( { req } ) => {
    if(typeof window === 'undefined') {
       // We are on the server
 
-      /* forma para local */
       return axios.create({
-         baseURL:'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local',
+         /* forma para local */
+         // baseURL:'http://ingress-nginx-controller.ingress-nginx.svc.cluster.local',
       /* forma para remoto       */
-        // baseURL: "http://www.ticketing-k8s-prod.tk",
+        baseURL: "http://www.ticketing-k8s-prod.tk",
         headers: req.headers,
       });
    } else {

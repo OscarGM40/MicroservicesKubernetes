@@ -15,10 +15,10 @@ spec:
       containers:
         - name: auth-mongo
           image: mongo:4.2.1
-      volumes:
-        - name: mongodb-storage
-          persistentVolumeClaim:
-            claimName: mongodb-pv-claim
+      # volumes:
+      #   - name: mongodb-storage
+      #     persistentVolumeClaim:
+      #       claimName: mongodb-pv-claim
 ---            
 apiVersion: v1
 kind: Service
@@ -33,13 +33,13 @@ spec:
       port: 27017
       targetPort: 27017
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongodb-pv-claim
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: mongodb-pv-claim
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   resources:
+#     requests:
+#       storage: 2Gi
