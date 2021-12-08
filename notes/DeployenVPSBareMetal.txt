@@ -13,6 +13,7 @@ sudo snap remove microk8s --purge
 
 Traefik es el Ingress-controller(se pueden usar otros,pero este permite generar certificados SSL y renovarlos!)
 
+IMPORTANTE: un cluster nuevo va a necesitar los dos secrets y el ingress-controller(y es el ingress-controller el que crea los Load Balancer si aplica)
 
 			INSTALAR MIKROk8S, FIJAR ALIASES, COMPROBAR STATUS
 
