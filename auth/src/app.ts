@@ -22,8 +22,8 @@ app.use(json()); // tambien valía app.use(express.json());
 app.use(
   cookieSession({
     signed:false,
-    //secure: true, //true= only https,false= http | https
-    secure:process.env.NODE_ENV !== 'test'
+    secure: false, //true= only https,false= http | https
+    // secure:process.env.NODE_ENV !== 'test'
   })
 )
 
