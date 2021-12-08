@@ -23,10 +23,8 @@ app.use(json());
 app.use(
   cookieSession({
     signed:false,
-    // secure = true == only https,
-    //secure = false == http | https (both)
-    //secure: true, 
-    secure:process.env.NODE_ENV !== 'test'
+    secure: false, 
+    // secure:process.env.NODE_ENV !== 'test'
   })
 )
 
