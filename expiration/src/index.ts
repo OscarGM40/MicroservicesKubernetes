@@ -3,6 +3,7 @@ import { natsWrapper } from "./nats-wrapper";
 
 
 const start = async () => {
+ console.log('Starting...'); 
   if (!process.env.NATS_URL) {
     throw new Error('Nats_url must be provided in the depl.yaml for tickets microservice!');
   }
